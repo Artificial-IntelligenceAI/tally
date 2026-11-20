@@ -3,7 +3,7 @@
 This chapter gives the complete context-free grammar of Tally in the notation
 of 0.3.1. Token classes are those of chapter 1: `IDENT`, `INT_LIT`,
 `FLOAT_LIT`, `CHAR_LIT`, `BYTE_LIT`, `STRING_LIT` (including raw strings),
-`BYTE_STRING_LIT`, `DOC`, `INNER_DOC`. Contextual keywords (1.3.3) are
+`BYTE_STRING_LIT`, `CSTRING_LIT`, `DOC`, `INNER_DOC`. Contextual keywords (1.3.3) are
 written as quoted terminals in the positions where they are keywords.
 
 **2.0.1** A source file is well-formed only if its token sequence is derived
@@ -350,7 +350,7 @@ Primary     = Literal | IDENT | "self" | "Self"
             | BlockExpr
             | AsmExpr ;
 Literal     = INT_LIT | FLOAT_LIT | CHAR_LIT | BYTE_LIT | STRING_LIT
-            | BYTE_STRING_LIT | "true" | "false" ;
+            | BYTE_STRING_LIT | CSTRING_LIT | "true" | "false" ;
 StructLit   = StructHead "{" [ FieldInit % "," ] [ ".." Expr ] "}" ;
 StructHead  = PostfixExpr      (* restricted by 2.10.3 *) ;
 FieldInit   = IDENT [ ":" Expr ] ;

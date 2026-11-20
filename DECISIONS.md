@@ -916,3 +916,146 @@ possible panic. The cost of this decision is that the stack half of a cost
 error appears only at link time, that bounds are conservative where function
 pointers are used widely, and that dynamically loaded code is unbounded
 unless it carries bound metadata.
+
+---
+
+## D34. Concurrency: threads and exactly-sized fibers, no `async`
+
+**Chosen.** Tally has OS threads and *fibers* (stackful tasks scheduled by a
+library executor on one OS thread). Blocking operations in `std` are
+fiber-aware: when called inside a fiber they suspend the fiber instead of the
+thread, so the same function works unchanged in both. A fiber's stack is
+allocated with exactly the link-time bound of its entry function (D33). There
+is no `async`/`await`, no future type in the language and no `Pin`. Fibers
+are scheduled within *scopes*: a fiber may borrow from the code that created
+its scope, and the scope waits for all its fibers before it returns
+(structured concurrency). Fibers do not migrate between threads.
+
+**Alternatives weighed.** Rust-style `async`/`await` with compiler-generated
+state machines; Go-style goroutines with growable stacks and a work-stealing
+scheduler; threads only; callback-based event loops; Zig's evolving model of
+passing an `Io` interface (from which the idea of the same code running
+blocking or evented comes).
+
+**Why.** `async`/`await` splits every library in two (function colouring),
+adds `Pin` and self-referential types to the language, makes trait methods
+returning futures difficult, and makes stack traces and debugging worse. It
+exists mainly because stackful tasks need big stacks, which waste memory.
+Exact stack bounds remove that reason: a fiber gets the stack it needs and no
+more, without guard pages or growth. Go's growable stacks need the ability to
+move stacks, which needs a garbage collector's knowledge of pointers; Tally
+has raw pointers, so stacks cannot move. Not migrating fibers between threads
+avoids having to prove that everything held across a suspension point is
+`Send`, at the cost of no automatic load balancing across cores (the
+thread-per-core model of Seastar and Glommio). The memory cost relative to
+`async` is recorded in D3.
+
+---
+
+## D35. The memory model is C++20's
+
+**Chosen.** Atomic operations and their orderings (`Relaxed`, `Acquire`,
+`Release`, `AcqRel`, `SeqCst`) have the semantics of the C++20 memory model.
+A data race, which is two unsynchronised accesses to the same memory location
+from different threads where at least one is a write and not both are
+atomic, is undefined behaviour; safe code cannot create one.
+
+**Alternatives weighed.** A new memory model; Java's model (races are not
+undefined but give weak guarantees); sequential consistency only.
+
+**Why.** The C++20 model is what the hardware vendors, LLVM and every other
+systems language implement, which makes interoperating with C and C++ code
+exact. Inventing a different one would be a research project with a high
+chance of being wrong. Sequential consistency alone would forbid the
+lock-free algorithms systems code needs (D2.4).
+
+---
+
+## D36. Unsafe code: explicit, local, and with a defined list of undefined behaviour
+
+**Chosen.** Operations the compiler cannot check (dereferencing raw
+pointers, calling foreign or `unsafe` functions, accessing mutable statics,
+reading union fields, inline assembly, implementing unsafe traits, asserting
+effects) are allowed only inside `unsafe` blocks. The body of an `unsafe fn`
+is not itself an unsafe block. The standard lists every kind of undefined
+behaviour; anything not listed is defined. The aliasing rule for references
+is stated simply in terms of a reference's period of use.
+
+**Alternatives weighed.** No unsafe subset (a checked-only language cannot
+write allocators, drivers or FFI); Rust's model, including unsafe function
+bodies being unsafe blocks (changed in Rust 2024) and an aliasing model still
+under research (Stacked Borrows, Tree Borrows); C's model, where undefined
+behaviour is spread through the whole language.
+
+**Why.** Systems code needs unchecked operations (D2.4), and soundness (D2.2)
+requires them to be marked and few. Requiring an `unsafe` block even inside an
+`unsafe fn` keeps each unchecked operation visible. A complete list of
+undefined behaviour is part of predictability: an implementer knows what
+optimisations are allowed, and a programmer knows what to avoid. The aliasing
+rule chosen is simpler and stricter than the research models; programs that
+follow it are valid under them too, and the open question of refining it is
+recorded in chapter 22.
+
+---
+
+## D37. Data layout is fully specified
+
+**Chosen.** Struct fields are laid out in declaration order with natural
+alignment, exactly as a C compiler for the target would lay out the same
+fields. Enums are a tag followed by a payload, with a tag type chosen by a
+fixed rule. The only layout optimisation is that `?T` for pointer-like `T`
+(references, non-null raw pointers, `Box`, function pointers, `NonZero`
+integers) uses the zero value for `.None`. `@packed`, `@align(N)` and
+`@bitpacked(uN)` give further control.
+
+**Alternatives weighed.** Rust's default of unspecified layout with field
+reordering and aggressive niche filling, plus opt-in `#[repr(C)]`; C's
+partially implementation-defined bitfields.
+
+**Why.** Systems programs read and write memory in fixed formats (hardware
+registers, file formats, network packets, shared memory, FFI), and
+predictability (D2.1) means a reader can compute a type's size and every
+field's offset by hand. Reordering saves some padding, which the programmer
+can recover by ordering fields themselves. Niche filling beyond the pointer
+case saves space in rare cases at the cost of making layouts hard to predict.
+`@bitpacked` replaces C bitfields with a definition that does not depend on
+the compiler.
+
+---
+
+## D38. Foreign functions: the C ABI, declared effects, declared stack bounds
+
+**Chosen.** Tally calls and is called by C through `extern "C"` declarations
+and `@export`. Every foreign function declaration must state its effects,
+may state its stack bound, and is unsafe to call. Only types with a C
+equivalent may cross the boundary. Panics never cross it: a panic inside an
+exported function aborts.
+
+**Alternatives weighed.** Importing C headers directly (Zig's `@cImport`);
+generating bindings with an external tool (Rust's bindgen); C++ interop.
+
+**Why.** Control (D2.4) requires zero-cost C interop. Effects and stack bounds
+must be declared for foreign code because the compiler cannot see it, and
+without declarations a single C call would make every caller `may any` and
+unbounded. Header import is valuable but large, and it would make the
+language depend on a C parser; it is left to a tool (chapter 22). C++ interop
+is out of scope because it requires adopting C++'s object model.
+
+---
+
+## D39. Inline assembly in the style of Rust's `asm!`
+
+**Chosen.** Inline assembly is an expression `asm may E stack N (template,
+operands...)` whose operand syntax follows Rust's `asm!`: operands bound to
+register classes or explicit registers, with direction (`in`, `out`,
+`inout`, `lateout`), clobbers, and options. It must declare its effects
+(default `sys`) and the stack it uses (default 0).
+
+**Alternatives weighed.** GCC-style constraint strings; no inline assembly
+(only separate assembly files); Zig's GCC-like syntax.
+
+**Why.** Kernels and drivers need a few instructions inline (barriers,
+special registers, system calls). Rust's operand syntax is the most readable
+existing design and maps onto LLVM directly. The effect and stack clauses are
+needed for cost accounting, because the compiler cannot analyse the assembly
+text.

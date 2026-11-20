@@ -242,10 +242,21 @@ second";                        // error: line end in string literal
 ```
 *From: D57, D12.*
 
-**1.4.6** A *raw string literal* is `r`, then zero or more `#`, then `"`, then
+**1.4.6** A *C string literal* is `c` immediately followed by a string
+literal (or `cr` followed by a raw string literal). It denotes the literal's
+bytes followed by one zero byte, has type `&CStr` (14.2.2), and must not
+contain a zero byte. Its token class is `CSTRING_LIT`.
+
+```tally
+let path = c"/dev/null";      // bytes "/dev/null\0"
+let bad = c"a\0b";            // error: interior zero byte
+```
+*From: D38.*
+
+**1.4.7** A *raw string literal* is `r`, then zero or more `#`, then `"`, then
 any text, then `"` followed by the same number of `#`. No escapes are
 processed and line ends are allowed; a CR LF inside a raw string is stored as
-LF. `br` introduces a raw byte string, whose content must be ASCII.
+LF. `br` introduces a raw byte string, whose content must be ASCII, and `cr` a raw C string.
 
 ```tally
 let path = r"C:\temp\new";
@@ -255,7 +266,7 @@ line two";                      // contains one LF
 ```
 *From: D57.*
 
-**1.4.7** `true` and `false` are the literals of type `bool`. There is no null
+**1.4.8** `true` and `false` are the literals of type `bool`. There is no null
 literal; the absent value of an optional type is written `.None` (4.6.1).
 
 ```tally
