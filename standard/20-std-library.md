@@ -496,8 +496,10 @@ A handler set with `set_handler` runs asynchronously on the interrupted
 thread's signal stack (a separate stack of
 `stack.bound` of an indirect call through `fn(Signal) may sys | panic`, which
 covers every function the program ever converts to that type (11.2.1), plus
+the largest signal frame the kernel pushes on the target, plus
 `CONTEXT_OVERHEAD`, set up by `std` for every thread; if that bound is
-unbounded, 64 KiB with a guard page), and its type limits it to effects within
+unbounded, 64 KiB with a guard page). While a handler runs, `std` blocks every
+signal it has a handler for, so handlers never nest on the signal stack, and its type limits it to effects within
 `sys | panic`, so it cannot allocate or wait, which makes it
 async-signal-safe as far as `std` is concerned.
 

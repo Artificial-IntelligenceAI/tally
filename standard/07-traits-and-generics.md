@@ -341,8 +341,9 @@ thread.spawn(move || print(&name));   // fine: name is moved into the closure
 **7.7.1** `FnOnce[Args]`, `FnMut[Args]: FnOnce[Args]` and
 `Fn[Args]: FnMut[Args]` (in `core.ops`) are implemented by closures (5.8.3),
 function items and function pointers. `Args` is a tuple type of the
-parameter types. Each has the associated type `Output` and the associated
-effect `Call`, and the methods `call_once(self, args: Args)`,
+parameter types. The associated type `Output` and the associated effect `Call`
+are declared only in `FnOnce`, and `FnMut` and `Fn` inherit them (so `F.Call`
+is unambiguous). The traits declare the methods `call_once(self, args: Args)`,
 `call_mut(&mut self, args: Args)` and `call(&self, args: Args)`, each returning
 `Self.Output` and having effect `Self.Call`. These methods cannot be named
 directly; a value is called with `f(args)` (5.7.1).

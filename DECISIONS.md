@@ -1604,3 +1604,63 @@ parameter is a slight inconvenience compared with Rust's `scope`, and
 `run_all` covers the most common borrowing pattern (one task per chunk) with
 no inconvenience at all. This entry adds to D24 and D34 rather than replacing
 them.
+
+---
+
+## D67. `Clone` returns a result
+
+**Chosen.** `Clone.clone` has the signature `fn clone(&self) -> Self !
+AllocError may Self.Clone`. Types that copy (every `Copy` type, `Rc`, `Arc`)
+never return an error; types that own memory return `AllocError` when an
+allocation fails. `@derive(Clone)` propagates the first failure.
+
+**Alternatives weighed.** An infallible `clone` that aborts on allocation
+failure (Rust); an infallible `Clone` implemented only by non-allocating
+types, with a separate `try_clone` for the rest.
+
+**Why.** D22 makes allocation failure an error everywhere; an infallible
+`clone` would be the one place a program could still abort on running out of
+memory without seeing it. A separate `try_clone` would split generic code
+into two worlds and make `@derive(Clone)` unusable for most structs. The cost
+is a `?` after `clone()` even where it cannot fail. This was found while
+writing the core library, after chapter 7 had first declared `clone`
+infallible; that text was corrected rather than kept.
+
+---
+
+## D68. Attributes that can break other code are written `@unsafe(...)`
+
+**Chosen.** `export` (which can make a symbol replace one other code relies
+on, such as `malloc`) and `section` (which can make code run implicitly,
+such as `.init_array`) must be written `@unsafe(export("sym"))` and
+`@unsafe(section("name"))`. They are listed among the unsafe declarations and
+their misuse among the kinds of undefined behaviour.
+
+**Alternatives weighed.** Treating them as ordinary attributes (Rust before
+its 2024 edition, which then changed `no_mangle` and `link_section` to
+unsafe attributes for the same reason); requiring an `unsafe` block around the
+item.
+
+**Why.** Soundness (D2.2) requires every way of causing undefined behaviour to
+be marked `unsafe`. An independent review of the first draft found that these
+two attributes could do so from code with no `unsafe` in it.
+
+---
+
+## D69. Stack overflow is outside the effect guarantee; stack bounds are its guard
+
+**Chosen.** A stack overflow in an execution context whose stack was not
+sized from a bound ends the program like a panic, but it is not the `panic`
+effect: the effect guarantee (10.7.1) explicitly excludes it. Code that must
+not be ended this way runs in an exactly sized context or carries
+`@stack_limit`, which is the stack half of cost accounting doing its job.
+
+**Alternatives weighed.** Treating every call as possibly panicking from
+overflow (every function would have `panic`, destroying the effect's
+meaning); treating overflow as an abort that is not reported.
+
+**Why.** Overflow depends on how much stack the context was given, not on the
+function's code, so it cannot be a property of a function's effects. D3 states
+that a `may none` function "cannot crash"; that statement is precise only
+together with this entry: it cannot crash by its own code, and it cannot
+overflow when its stack was sized by the bound the toolchain computes.
