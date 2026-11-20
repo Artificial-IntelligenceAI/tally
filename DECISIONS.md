@@ -552,3 +552,204 @@ Wrapping a successful or present value is the overwhelmingly common case and
 carries no information, so it is implicit; failure and absence are always
 written out, so the unusual path is the visible one. Implicit wrapping never
 runs user code and has a fixed cost, so it does not weaken D2.1.
+
+---
+
+## D20. Errors are values; `?` converts only through declared `from` variants
+
+**Chosen.** A function that can fail returns `T ! E`. The postfix `?`
+operator returns early with the error if there is one. If the operand's error
+type differs from the function's, `?` converts it only when the function's
+error type is an enum with exactly one variant marked `from` whose payload is
+the operand's error type; any other mismatch is a compile error. There are no
+exceptions and no other implicit error conversion.
+
+**Alternatives weighed.** Exceptions (C++, Java), which make every call a
+possible exit; Rust's `?` with arbitrary `From::from` conversions, which can run
+any code; Zig's global error sets, which merge automatically but cannot carry
+data; Go's multiple return values, which can be ignored silently.
+
+**Why.** Errors that are ordinary values are visible in signatures and at
+every call site that can fail (`?` marks it), which serves D2.1 and D2.3.
+Restricting `?`'s conversion to a declared enum variant gives the convenience
+of automatic wrapping (the common case is "this error is one of the causes of
+my error") while guaranteeing that `?` never runs user code, never allocates,
+and can be understood by reading the error enum. Payload-carrying errors are
+kept because systems code needs to report which file, which line, which errno.
+
+---
+
+## D21. Panics stop the program; there is no unwinding
+
+**Chosen.** A panic (from a bug such as an out-of-range index, an overflow,
+or an explicit `panic` call) calls the program's panic handler, which must not
+return; by default it prints a message and aborts the process. No
+destructors or deferred expressions run. There is no way to catch a panic.
+
+**Alternatives weighed.** Unwinding with optional catching (C++ exceptions,
+Rust's default `panic = unwind` with `catch_unwind`); per-thread panics that
+leave the rest of the process running (Rust).
+
+**Why.** Unwinding adds hidden control-flow edges to every call, landing pads
+to every function, and a requirement that every data structure be left in a
+consistent state at every possible panic point, which is rarely achieved in
+practice ("exception safety"). Those edges make code size and behaviour less
+predictable (D2.1). Systems programs that must survive a bug survive it at a
+process or partition boundary (a supervisor restarts the process), which is
+more robust than catching. The loss is real: a server cannot contain one
+request's bug inside one thread, and test harnesses must run tests in separate
+processes (D49).
+
+---
+
+## D22. Allocation failure is an error value
+
+**Chosen.** Every operation that allocates memory returns an error
+(`AllocError`) when the allocator cannot satisfy it, rather than aborting.
+`Vec.push`, `Box.new`, `String.push_str` and similar return `T ! AllocError`.
+
+**Alternatives weighed.** Abort on allocation failure (Rust's default, C++'s
+default `new`); a separate fallible API alongside an infallible default (the
+direction Rust took for the Linux kernel).
+
+**Why.** Kernels, embedded systems and databases must handle running out of
+memory; an infallible default makes the wrong behaviour the easy one, and two
+parallel APIs double the library surface. With `?` (D20), handling is one
+character per call. Application programs pay a small syntactic cost for
+behaviour that is correct everywhere. Zig showed this is workable.
+
+---
+
+## D23. Ownership and moves; no partial moves
+
+**Chosen.** Every value has exactly one owner (a binding, a field, an element,
+or a temporary). Assignment, argument passing and returning move the value,
+leaving the source unusable, unless the type is `Copy`. Copying of other
+values is explicit through `Clone`. A value is destroyed (dropped) exactly
+once, when its owner goes out of scope without having been moved from. A
+single field cannot be moved out of a struct; a struct is moved as a whole
+(or destructured as a whole by a pattern, or a field is taken with
+`mem.replace`).
+
+**Alternatives weighed.** Garbage collection; reference counting by default
+(Swift); manual allocation and freeing (C, Zig); Rust's model including
+partial moves; C++ copy-by-default with move semantics opt-in.
+
+**Why.** Ownership gives deterministic destruction with no run-time cost and
+is the foundation of memory safety without a collector, which is soundness
+(D2.2) without giving up predictability (D2.1). Move-by-default with explicit
+`clone` makes every expensive copy visible. Partial moves (Rust) let a struct
+be half-moved, which forces readers and the compiler to track per-field
+states and conditional drop flags per field; banning them removes that with
+little loss, because destructuring and `mem.replace` cover the uses.
+
+---
+
+## D24. References are checked without lifetime annotations
+
+**Chosen.** Tally has shared (`&T`) and exclusive (`&mut T`) references,
+checked by a borrow checker in the style of Rust's non-lexical lifetimes:
+while an exclusive reference to a place is live, nothing else may access the
+place; while a shared reference is live, nothing may modify it. Unlike Rust,
+**lifetimes are never written**. Instead:
+
+* inside function bodies, regions are inferred;
+* a function whose return type contains references says which parameters it
+  may borrow from with a `from` clause (`-> &str from a, b`); `from *p`
+  means "from what `p` refers to" rather than from `p` itself; without a
+  clause, the result may borrow from every reference parameter;
+* a struct or enum holding references is declared `view`, and has exactly one
+  region: all references inside it share one lifetime.
+
+**Alternatives weighed.** Rust's explicit lifetime parameters; Hylo/Val's
+second-class references (references can never be stored, only passed down),
+which need no annotations but forbid storing a slice in a struct, so parsers,
+iterators and string views become awkward; Vale's generational references,
+which check at run time; garbage collection.
+
+**Why.** Rust demonstrated that compile-time borrow checking gives memory
+safety and data-race freedom with no run-time cost, which D2.2 requires.
+Its main usability cost is lifetime syntax, and most of that syntax encodes
+two facts: which inputs a returned reference comes from, and that a struct
+holds borrowed data. `from` clauses and `view` types state exactly those two
+facts in words. The single-region rule loses structs that hold references with
+two independent lifetimes, and functions whose lifetimes relate in ways a
+`from` clause cannot express (Rust's `'a: 'b` bounds, higher-ranked
+lifetimes); experience with Rust suggests these are rare in application code
+but do occur in advanced library code, which must then use owned data,
+indices, or unsafe code. That loss is accepted for a much simpler model.
+
+---
+
+## D25. Drop order and temporaries
+
+**Chosen.** Bindings are dropped at the end of their block in reverse order of
+declaration; struct fields are dropped in declaration order; array and slice
+elements from first to last. A temporary created while evaluating an
+expression is dropped at the end of the enclosing *full expression*
+(statement, `let` initialiser, condition, block tail), except that the
+temporaries of a `match`, `if let` or `while let` scrutinee live until the end
+of that construct. Temporaries are never extended to the lifetime of a
+binding: `let r = &make();` is an error.
+
+**Alternatives weighed.** Rust's rules, including temporary lifetime extension
+for `let x = &temp;` and edition-dependent tail-expression rules; C++'s rules
+(temporaries die at the end of the full expression, with extension when bound
+to a const reference).
+
+**Why.** Destruction order must be easy to predict (D2.1) because destructors
+release locks, close files and free memory. One rule ("end of the
+statement") plus one exception that every reader needs (a `match` needs its
+scrutinee for its whole body) is easier to hold in the head than Rust's set
+of extension rules. The cost is an occasional extra `let`.
+
+---
+
+## D26. Interior mutability and thread-safety markers
+
+**Chosen.** Shared references normally forbid mutation. Types built on the
+primitive `UnsafeCell[T]` (such as `Cell`, `Atomic`, `Mutex`) may be mutated
+through shared references under their own rules. Two marker traits, `Send`
+(may be moved to another thread) and `Sync` (may be shared between threads by
+reference), are implemented automatically by the compiler for types whose
+parts implement them, and can be asserted with `unsafe impl` for types that
+manage their own synchronisation.
+
+**Alternatives weighed.** No interior mutability (pure functional
+approaches); C-style `volatile`/unchecked sharing; Rust's design (which this
+is); per-object locks (Java).
+
+**Why.** Without some form of interior mutability, shared caches, counters,
+locks and lazy initialisation cannot be written safely. Rust's markers are the
+only known design that makes data races a compile error without a run-time
+cost, which D2.2 requires. Auto-implementation keeps them out of most code.
+
+---
+
+## D27. Traits: monomorphised generics, strict coherence, no specialisation
+
+**Chosen.** Polymorphism is through traits, as in Rust: traits declare
+methods, associated types, associated constants and associated *effects*
+(D30); generic functions and types are compiled separately for each set of
+type arguments (monomorphisation); `dyn Trait` gives dynamic dispatch through
+a vtable when chosen explicitly. An implementation of a trait for a type is
+allowed only in the package that declares the trait or the type's outermost
+constructor (the orphan rule), and two implementations of the same trait whose
+headers could apply to the same type are an error, regardless of their bounds.
+There is no specialisation, no inheritance, and no higher-kinded types.
+
+**Alternatives weighed.** Go-style structural interfaces (no explicit impls);
+C++ templates checked only at instantiation; Zig's `comptime` duck typing;
+Rust's coherence rules (more permissive: `#[fundamental]` types, negative
+reasoning about bounds, upcoming specialisation); type classes with
+dictionary passing (Haskell), which hides allocation and indirection.
+
+**Why.** Trait-checked generics give errors at the definition rather than at
+each use (local reasoning, D2.3) and monomorphisation gives predictable,
+dispatch-free code (D2.1); dynamic dispatch is available but always visible as
+`dyn`. Strict coherence (header-overlap ignoring bounds) is less expressive
+than Rust's, but it means a reader can find every implementation of a trait
+for a type in at most two packages and adding an implementation in a
+dependency can never break a dependent's existing impls in surprising ways.
+Specialisation was rejected because it makes which code runs depend on
+distant impls, against D2.3.
