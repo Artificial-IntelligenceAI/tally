@@ -1566,3 +1566,41 @@ binary32 and binary64 now exist (the CORE-MATH project) with performance close
 to conventional libraries. The cost is somewhat slower code than the fastest
 approximations, and implementers must use or port such implementations rather
 than calling the platform's `libm`.
+
+---
+
+## D66. `Static`, regions on `dyn`, higher-ranked callable signatures, and environment-based scoped spawning
+
+**Chosen.** Four additions close a soundness gap in the first draft of D24 and
+D34, where `thread.spawn` and scoped spawning let a closure that borrowed a
+local escape to another thread, and `dyn` types forgot the borrows of the value
+they hid:
+
+1. A built-in marker trait `Static`, implemented by types whose regions are
+   all `static` (types holding no borrowed data). It is the only way to say
+   "this type parameter may be kept beyond the call" and is Tally's spelling
+   of Rust's `T: 'static`.
+2. Every `dyn` type carries one region bounding what it hides, elided like a
+   reference's in signatures and `static` in non-`view` fields.
+3. Elided regions in callable signatures (function pointer types, `dyn Fn`
+   types and `Fn` bounds) are higher-ranked, and closure bodies are checked
+   with their parameter regions universal.
+4. Scoped threads and fibers that start work dynamically reach borrowed data
+   through an explicit environment reference (`thread.scope(&env, |s| ...)`,
+   `s.env()`), while batches that may borrow freely are started with
+   `run_all`, which cannot return until every task has finished.
+
+**Alternatives weighed.** Named region parameters (Rust lifetimes such as
+`Scope<'scope, 'env>`), which would express Rust's `thread::scope` exactly but
+contradict D24's promise that ordinary code never writes lifetimes; scope
+guards whose destructor joins, unsound because leaking a value is safe
+(D25, the "leakpocalypse" Rust met in 2015); only allowing `Static` closures
+(sound but loses the common pattern of threads writing disjoint parts of one
+array).
+
+**Why.** A single marker trait and two rules about where regions live are a
+small price for keeping signatures free of lifetimes. The environment
+parameter is a slight inconvenience compared with Rust's `scope`, and
+`run_all` covers the most common borrowing pattern (one task per chunk) with
+no inconvenience at all. This entry adds to D24 and D34 rather than replacing
+them.

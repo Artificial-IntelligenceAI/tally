@@ -133,7 +133,7 @@ opt-in scheduler that migrates fibers whose entry closures are `Send`, if
 thread-per-core designs prove insufficient for common servers.
 
 ```tally
-fiber.run(|s| ...);   // interim: single-threaded scheduler per call
+fiber.run(&env, |s| ...);   // interim: single-threaded scheduler per call
 ```
 *From: D34.*
 

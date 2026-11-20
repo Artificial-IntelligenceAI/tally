@@ -173,6 +173,11 @@ let r: &u32 = &x;          // r: &ρ1 u32, the loan's region ρ2, with constrain
 6. *Universal regions* contain every point of the body and their own end
    marker, and the end markers of every universal region they are known to
    outlive (9.4.3).
+7. *Well-formedness.* Wherever a type `&ρ T` or `&ρ mut T` occurs in the
+   type of a local or temporary, or in a callee's instantiated signature at a
+   call, every region occurring in `T` outlives ρ. Wherever a type argument
+   is substituted for a parameter bounded by `Static` (7.6.7), every region
+   occurring in the argument outlives `static`.
 
 A constraint `ρa : ρb` is satisfied when ρa ⊇ ρb (points and end markers).
 
@@ -191,8 +196,10 @@ the order they appear); in a method of an `impl` whose implemented type
 contains regions, those regions (*impl regions*); and one region `ret` for all
 elided regions in the return type. The *known relations* are: `static` outlives
 every region; every region outlives itself; for a parameter type `&ρ1 T` where
-`T` contains region ρ2, ρ2 outlives ρ1 (well-formedness); for each `from`
-source, its regions outlive `ret` (9.4.4). After solving, if a universal region
+`T` contains region ρ2, ρ2 outlives ρ1 (well-formedness); every region of a
+type parameter bounded by `Static`, and every region of a type argument known
+to be `Static`, outlives every region; for each `from` source, its regions
+outlive `ret` (9.4.4). After solving, if a universal region
 ρa contains `end(ρb)` and "ρa outlives ρb" is not a known relation, the
 program has an error.
 
@@ -325,6 +332,45 @@ print(count);                 // error: count is exclusively borrowed by inc, us
 inc();
 ```
 *From: D24, D54.*
+
+**9.5.6** Every `dyn` type carries one region, which bounds the regions of
+the concrete type it hides: coercing a pointer to `U` into a pointer to
+`dyn Tr` (4.11.1) requires every region occurring in `U` to outlive the `dyn`
+type's region. The region of a `dyn` type written in a function signature is
+elided like a reference's (9.4.3); in a field of a `view` declaration it is
+the declaration's own region; in a field of any other declaration, in the
+type of a constant or static, and in a type argument of a non-`view`
+declaration's field, it is `static`. A `dyn` type does not make a declaration
+need `view` (4.10.2).
+
+```tally
+struct Plugins { list: Vec[Box[dyn Plugin]] }       // dyn region: static
+fn add(p: &mut Plugins, name: &str) ! AllocError may alloc {
+    p.list.push(Box.new(Named { name })?)?;          // error: Named borrows `name`, not static
+}
+```
+*From: D24, D66.*
+
+**9.5.7** Elided regions in the parameter and return types of a function
+pointer type, of a `dyn Fn`/`FnMut`/`FnOnce` type, and of an
+`Fn`/`FnMut`/`FnOnce` bound are *higher-ranked*: the callable must work for
+every choice of them. Accordingly, a closure body is checked with the elided
+regions of its parameter types (and the `ret` region of its return type, with
+`from` defaulting to all its parameters) as universal regions of its own,
+with only the known relations of 9.4.3; the regions of its captured places
+are region variables of the enclosing function, solved together with it.
+Regions that a bound's parameter types contain through type arguments (for
+example the regions of `E` in `FnOnce(&Scope[E])`) are not elided and are not
+higher-ranked.
+
+```tally
+fn apply[F: Fn(&u32) -> &u32](f: F) -> u32 { let x = 7; *f(&x) }
+let k = 5;
+apply(|r| r);        // fine: returns its argument (from the parameter)
+apply(|r| &k);       // fine: k outlives every region of the call
+let g = |r: &u32| { SAVED = r; };   // error: r's region is higher-ranked and need not be static
+```
+*From: D24, D66.*
 
 ## 9.6 Drops and borrows
 

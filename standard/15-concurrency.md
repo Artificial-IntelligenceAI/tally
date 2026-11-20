@@ -11,10 +11,8 @@ limits (11.4.1) and context-local statics (15.5.2) are per execution context.
 
 ```tally
 fn main() {                                  // main thread
-    thread.scope(|s| {
-        s.spawn(|| work());                  // a second thread
-        fiber.run(|fs| { fs.spawn(|| io_task()); });   // fibers on the current thread
-    });
+    _ = thread.spawn(|| work());                          // a second thread
+    _ = fiber.run(&(), |fs| { _ = fs.spawn(|_| io_task()); });   // fibers on the current thread
 }
 ```
 *From: D34.*
@@ -26,7 +24,7 @@ a *suspension point*: a call to a waiting primitive (20.1.3) or to
 interleaved with other fibers of the same scheduler.
 
 ```tally
-fs.spawn(|| { counter.set(counter.get() + 1); });   // no other fiber of this scheduler runs in between
+_ = fs.spawn(|s| { let c = s.env(); c.set(c.get() + 1); });   // no other fiber runs in between
 ```
 *From: D34.*
 
@@ -80,7 +78,7 @@ passed to a scheduler on another thread does.
 ```tally
 let rc = Rc.new(5)?;
 thread.spawn(move || print(*rc));      // error: Rc[i64] is not Send
-fiber.run(|fs| { fs.spawn(|| print(*rc)); });   // fine: same thread
+_ = fiber.run_all([move || print(*rc)]);  // fine: fibers stay on this thread
 ```
 *From: D26, D34.*
 
@@ -117,10 +115,9 @@ which synchronise.
 
 ```tally
 var n = 0;
-thread.scope(|s| {
-    s.spawn(|| n += 1);
-    s.spawn(|| n += 1);       // error: n captured by &mut in two closures at once (9.5.5)
-});
+let a = || n += 1;
+let b = || n += 1;              // error: n is already exclusively borrowed by a (9.5.5)
+_ = thread.run_all([a, b]);
 ```
 *From: D35, D26.*
 
@@ -129,10 +126,10 @@ they never run at the same time (15.1.2). A fiber and a thread, or fibers of
 different schedulers, can race like threads.
 
 ```tally
-fiber.run(|fs| {
-    let c = Cell.new(0);
-    fs.spawn(|| c.set(c.get() + 1));
-    fs.spawn(|| c.set(c.get() + 1));     // fine: Cell is not Sync, but fibers share a thread
+let c = Cell.new(0);
+fiber.run(&c, |fs| {
+    _ = fs.spawn(|s| s.env().set(s.env().get() + 1));
+    _ = fs.spawn(|s| s.env().set(s.env().get() + 1));   // fine: Cell is not Sync, but fibers share a thread
 });
 ```
 *From: D34, D35.*

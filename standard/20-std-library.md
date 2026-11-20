@@ -303,11 +303,16 @@ io.println("took ", t0.elapsed().as_millis(), " ms");
 **20.7.1** `std.thread`:
 
 ```tally
-pub fn spawn[T: Send, F: FnOnce() -> T + Send](f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F;
-pub fn scope[R, F: FnOnce(&Scope) -> R](f: F) -> R may F | block | sys;
-impl Scope { pub fn spawn[T: Send, F: FnOnce() -> T + Send](&self, f: F) -> ScopedJoinHandle[T] ! SpawnError from self may alloc | sys | F; }
+pub fn spawn[T: Send + Static, F: FnOnce() -> T + Send + Static](f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F;
+pub fn run_all[T: Send, F: FnOnce() -> T + Send, I: IntoIterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
+pub fn scope[E: Sync, R, F: FnOnce(&Scope[E]) -> R](env: &E, f: F) -> R may F | block | sys;
+pub view struct Scope[E] { ... }                     // Sync; its own region is that of `env`
+impl[E] Scope[E] {
+    pub fn env(&self) -> &E from *self;
+    pub fn spawn[T: Send + Static, G: FnOnce(&Scope[E]) -> T + Send + Static](&self, g: G) -> ScopedJoinHandle[T] ! SpawnError from self may alloc | sys | G;
+}
 pub struct Builder { pub name: ?&str, pub stack_size: ?usize }
-impl Builder { pub fn spawn[T: Send, F: FnOnce() -> T + Send](self, f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F; }
+impl Builder { pub fn spawn[T: Send + Static, F: FnOnce() -> T + Send + Static](self, f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F; }
 impl[T] JoinHandle[T] { pub fn join(self) -> T may sys | block; }            // waiting
 impl[T] ScopedJoinHandle[T] { pub fn join(self) -> T may sys | block; }
 pub fn sleep(d: Duration) may sys | block;                                    // waiting
@@ -320,15 +325,26 @@ The new thread's stack is `stack.bound(f)` plus `CONTEXT_OVERHEAD`, rounded up
 to the page size, if the bound is known and `Builder.stack_size` is not
 given; otherwise `stack_size`, or 2 MiB by default, with a guard page
 (11.6.2). The thread starts with a signal stack (20.9.2) and fresh
-context-local statics. `scope` returns after every thread spawned on its
-`Scope` has finished; such threads may borrow from outside the scope.
-Dropping a `JoinHandle` detaches the thread. Because panics end the process,
-`join` has no error case.
+context-local statics. A thread started by `spawn` may outlive its creator,
+so its closure must be `Static` (7.6.7). Threads that borrow are started in
+one of two structured ways. `run_all` starts one thread per callable produced
+by `fs`, waits for all of them, and returns their results in order; the
+callables may borrow anything, because they cannot outlive the call.
+`scope` runs `f` on the current thread with a `Scope` through which more
+threads can be started at any time; it returns after all of them have
+finished. Such threads reach borrowed data only through `env`, which lives
+for the whole call (9.5.7 explains why their closures must otherwise be
+`Static`). Dropping a `JoinHandle` detaches the thread. Because panics end the
+process, `join` has no error case.
 
 ```tally
 var results: [4]u64 = [0; 4];
-thread.scope(|s| {
-    for (i, r) in results.iter_mut().enumerate() { _ = s.spawn(move || *r = crunch(i)); }
+let jobs = results.iter_mut().enumerate().map(|(i, r)| move || *r = crunch(i));
+_ = thread.run_all(jobs)?;                       // each thread writes its own element
+
+let table = load_table()?;
+thread.scope(&table, |s| {
+    for q in 0..8 { _ = s.spawn(move |s| answer(s.env(), q)); }   // shared read-only access
 });
 ```
 *From: D34, D33.*
@@ -338,29 +354,35 @@ thread.scope(|s| {
 **20.8.1** `std.fiber`:
 
 ```tally
-pub fn run[R, F: FnOnce(&Scope) -> R](f: F) -> R ! SpawnError may F | alloc | sys | block;
-impl Scope {
-    pub fn spawn[T, F: FnOnce() -> T](&self, f: F) -> Fiber[T] ! SpawnError from self may alloc | sys | F;
-    pub fn spawn_sized[T, F: FnOnce() -> T](&self, size: usize, f: F) -> Fiber[T] ! SpawnError from self may alloc | sys | F;
+pub fn run[E, R, F: FnOnce(&Scope[E]) -> R](env: &E, f: F) -> R ! SpawnError may F | alloc | sys | block;
+pub fn run_all[T, F: FnOnce() -> T, I: IntoIterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
+pub view struct Scope[E] { ... }                     // its own region is that of `env`
+impl[E] Scope[E] {
+    pub fn env(&self) -> &E from *self;
+    pub fn spawn[T: Static, G: FnOnce(&Scope[E]) -> T + Static](&self, g: G) -> Fiber[T] ! SpawnError from self may alloc | sys | G;
+    pub fn spawn_sized[T: Static, G: FnOnce(&Scope[E]) -> T + Static](&self, size: usize, g: G) -> Fiber[T] ! SpawnError from self may alloc | sys | G;
 }
 impl[T] Fiber[T] { pub fn join(self) -> T may sys | block; }     // waiting
 pub fn yield_now() may sys | block;                              // waiting
 pub fn in_fiber() -> bool may sys;
 ```
 
-`run` creates a scheduler on the current thread, runs `f` as the first fiber,
-and returns `f`'s result after every fiber spawned on its `Scope` (and,
-recursively, their scopes) has finished. Fibers may borrow anything that
-outlives the call to `run`. A `Scope` may be passed to fibers by reference so
-they can spawn more fibers.
+`run` creates a scheduler on the current thread, runs `f` as the first fiber
+(`f` may borrow anything), and returns `f`'s result after every fiber spawned
+on its `Scope` has finished. Fibers spawned on the `Scope` receive it, so they
+can reach `env` (which lives for the whole call) and spawn more fibers; their
+closures must otherwise be `Static`, for the reason given in 9.5.7.
+`fiber.run_all` runs one fiber per callable on a new scheduler on the current
+thread and returns their results in order; those callables may borrow
+anything.
 
 ```tally
-fn serve_all(addr: SocketAddr) ! AppError may sys | block | alloc | panic {
-    fiber.run(|s| -> () ! AppError {
+fn serve_all(addr: SocketAddr, cfg: &Config) ! AppError may sys | block | alloc | panic {
+    fiber.run(cfg, |s| -> () ! AppError {
         let l = TcpListener.bind(addr)?;
         loop {
-            let (conn, _) = l.accept()?;          // suspends this fiber, not the thread
-            _ = s.spawn(move || serve(conn))?;    // AppError has `from Spawn(SpawnError)`
+            let (conn, _) = l.accept()?;                   // suspends this fiber, not the thread
+            _ = s.spawn(move |s| serve(conn, s.env()))?;   // AppError has `from Spawn(SpawnError)`
         }
     })?
 }
@@ -375,8 +397,8 @@ page and is for unbounded or foreign-calling code; overflow then panics
 (11.6.2). The fiber's stack is freed when it finishes.
 
 ```tally
-_ = s.spawn(move || handle(conn))?;          // stack = bound(handle closure) + overhead, e.g. 3.2 KiB
-_ = s.spawn_sized(1 << 20, move || legacy(conn))?;   // calls unbounded C code
+_ = s.spawn(move |_| handle(conn))?;                // stack = bound(the closure) + overhead, e.g. 3.2 KiB
+_ = s.spawn_sized(1 << 20, move |_| legacy(conn))?; // calls unbounded C code
 ```
 *From: D33, D34.*
 

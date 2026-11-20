@@ -48,7 +48,7 @@ fn f() -> Vec[u8] ! AllocError may alloc { var v = Vec.new(); v.push(1)?; v }   
 ## 19.2 Fundamental traits
 
 **19.2.1** `core.marker` declares `Copy` (7.6.1), `Send`, `Sync` (15.2),
-`Sized` (7.6.5), and the zero-sized marker structs `NotSend` and `NotSync`
+`Sized` (7.6.5), `Static` (7.6.7), and the zero-sized marker structs `NotSend` and `NotSync`
 (15.2.2), each with a constant `NotSend.VALUE`/`NotSync.VALUE` used to build
 them. `core.ops` declares `Drop` (7.6.3), `Deref`, `DerefMut` (7.6.4), `Fn`,
 `FnMut`, `FnOnce` (7.7). `core.default` declares:

@@ -317,6 +317,22 @@ impl Eq for Thing {}          // error: Eq can only be derived
 ```
 *From: D17, D27.*
 
+**7.6.7** `Static` (marker, in `core.marker`) is implemented by every type in
+which every region that occurs is `static`: types that hold no references,
+and types holding only references to static data. It cannot be implemented by
+hand. A bound `T: Static` lets generic code store a `T` beyond the current
+call (in a static, another thread, a fiber that outlives its creator), and
+makes every region of `T` known to outlive every region (9.4.3). A `dyn` type
+is `Static` exactly when its region is `static` (9.5.6).
+
+```tally
+pub fn spawn[T: Send + Static, F: FnOnce() -> T + Send + Static](f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F;
+let name = String.from("w")?;
+thread.spawn(|| print(&name));        // error: the closure borrows `name`, so it is not Static
+thread.spawn(move || print(&name));   // fine: name is moved into the closure
+```
+*From: D24, D66.*
+
 ## 7.7 Function traits
 
 **7.7.1** `FnOnce[Args]`, `FnMut[Args]: FnOnce[Args]` and

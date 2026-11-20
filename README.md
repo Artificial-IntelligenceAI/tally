@@ -21,12 +21,12 @@ import std.net.{TcpListener, SocketAddr};
 fn mix(out: &mut []f32, voices: &[]Voice) may none { ... }
 
 /// The `may` clause is part of the public contract and is checked.
-pub fn serve(addr: SocketAddr) ! io.Error may sys | block | alloc | panic {
+pub fn serve(addr: SocketAddr, cfg: &Config) ! io.Error may sys | block | alloc | panic {
     let l = TcpListener.bind(addr)?;
-    fiber.run(|s| -> () ! io.Error {
+    fiber.run(cfg, |s| -> () ! io.Error {
         loop {
-            let (conn, _) = l.accept()?;           // suspends only this fiber
-            _ = s.spawn(move || handle(conn));     // stack sized exactly, at link time
+            let (conn, _) = l.accept()?;                     // suspends only this fiber
+            _ = s.spawn(move |s| handle(conn, s.env()));     // stack sized exactly, at link time
         }
     })?
 }
