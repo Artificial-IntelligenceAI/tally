@@ -54,7 +54,8 @@ optional `-prerelease`, as in Semantic Versioning 2.0.0, without build
 metadata); `tally` (string, required, the major version of this standard the
 package is written against, `"1"` for this standard, 18.7.1); `license`
 (string, an SPDX licence expression); `description`, `repository`,
-`homepage` (strings); `authors` (array of strings).
+`homepage` (strings); `authors` (array of strings); `api-targets` (array of
+target triples used by `tally api`, 21.3.11).
 
 ```toml
 [package]
@@ -124,15 +125,18 @@ link = ["z"]
 ```
 *From: D45, D38.*
 
-**18.2.7** Each `[[generate]]` entry declares a generator (18.6): `tool`
-(either `"dep:KEY/BIN"`, binary `BIN` of dependency `KEY`, or `"bin/NAME"`, a
-binary target of this package's workspace), `args` (array of strings),
-`inputs` (array of globs relative to the package directory), and `module` (the
-module path, beneath this package, that the generated file becomes).
+**18.2.7** `[build-dependencies]` has the same form as `[dependencies]`; its
+packages are built for the host and are available only as generator tools.
+Each `[[generate]]` entry declares a generator (18.6): `tool` (required,
+`"KEY/BIN"`: binary target `BIN` of build-dependency `KEY`), `args` (array
+of strings, default empty), `inputs` (array of globs relative to the package
+directory, default empty), and `module` (required: the full module path of
+the generated module, whose first segment must be the package name). A
+generated module whose path equals that of a module in `src/` is an error.
 
 ```toml
 [[generate]]
-tool = "dep:protogen/protogen"
+tool = "protogen/protogen"         # [build-dependencies] protogen = { ... }
 inputs = ["proto/*.proto"]
 module = "httpd.proto.messages"
 ```
@@ -229,17 +233,23 @@ json 0.8.3 and json 0.9.0   -> different identities
 version selection*:
 
 1. Start with the set of *requirements* given by the root package's
-   dependencies (and dev-dependencies for `tally test`): pairs of an identity
-   and a minimum version.
+   dependencies, dev-dependencies and build-dependencies (for a workspace,
+   those of every member), including optional dependencies whether or not a
+   feature enables them: pairs of an identity and a minimum version.
 2. For each identity, the *selected* version is the greatest minimum version
    required for it.
-3. Read the manifest of every selected version; add its dependencies'
-   requirements (not its dev-dependencies) to the set.
+3. Read the manifest of every selected version; add its dependencies' and
+   build-dependencies' requirements (including optional ones, but not its
+   dev-dependencies) to the set.
 4. Repeat steps 2 and 3 until the selection does not change.
 
 A version is *available* if the source has it (18.4.3). If a selected version
 is not available, the build fails; Tally never chooses a version higher than
-the greatest stated minimum. Pre-release versions are selected only if some
+the greatest stated minimum. One selection serves every command (`build`,
+`test`, `fetch`), so the lock file does not depend on which command wrote it;
+packages that end up unused (an optional dependency no feature enables) are
+selected and locked but not fetched or built. Pre-release versions are
+selected only if some
 package requires that exact pre-release version or a later pre-release of
 the same `MAJOR.MINOR.PATCH`.
 
@@ -270,8 +280,11 @@ recorded content hash, and fail if it does not. If the lock file is missing
 or does not match the selection computed from the manifests, the command
 writes a new lock file, unless `--locked` is given, in which case it fails.
 The lock file is TOML with one `[[package]]` table per package, with keys
-`name`, `source`, `version`, `commit` and `hash`, sorted by source then
-version.
+`name`, `source`, `version`, `commit` and `hash`. `source` is
+`git+URL` (URL normalised by 18.4.7) followed by `#dir=DIR` when the package is
+in a subdirectory. Entries are sorted by `source` (byte-wise) and then by
+version (semantic-versioning precedence). The same source string is used by
+`tally audit` (21.3.9).
 
 ```toml
 [[package]]
@@ -285,8 +298,9 @@ hash = "sha256:9a0e…"
 
 **18.4.5** The *content hash* of a package is `sha256:` followed by the
 lowercase hexadecimal SHA-256 digest of this byte sequence: for each regular
-file in the package directory, excluding the directories `.git` and `out` at
-any depth and the file `tally.lock`, in increasing byte-wise order of the
+file in the package directory, excluding the directories `.git` and `out` and
+the file `tally.lock` at the top of the package directory (but not files of
+those names deeper down), in increasing byte-wise order of the
 file's path relative to the package directory (with `/` as separator), the
 path's UTF-8 bytes, a zero byte, the file's length as an 8-byte little-endian
 integer, and the file's bytes. Symbolic links are an error.
@@ -321,7 +335,8 @@ HTTPS://Example.org/json.git/  ->  https://example.org/json
 **18.5.1** For each selected package, the set of enabled features is the
 union of the features requested for it by every package that depends on it
 (plus `default` unless every dependent sets `default-features = false`), closed
-under the `[features]` table's implications. A package is compiled once per
+under the `[features]` table's implications. A feature entry `"KEY/FEATURE"`
+also enables the optional dependency `KEY`. A package is compiled once per
 build with that set. Features must therefore only add functionality; code must
 remain correct when more features are enabled than it asked for.
 

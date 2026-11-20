@@ -128,7 +128,7 @@ Their size and alignment are 4 and 8 bytes.
 
 ```tally
 let x: f32 = 1.5;
-let y: f64 = x;          // implicit widening (4.11.2)
+let y: f64 = x;          // implicit widening (4.11.1, rule 6)
 ```
 *From: D2.*
 
@@ -281,7 +281,7 @@ represented by address 0 (13.3.6). Raw pointers to unsized types have the same
 layout as references to them.
 
 ```tally
-let p: *u8 = &buf[0] as *u8;   // creating a raw pointer is safe
+let p: *u8 = &buf[0];          // coercion; creating a raw pointer is safe
 let c: ?*u8 = .None;           // a C null pointer
 let v = unsafe { *p };         // dereference requires unsafe
 ```
@@ -347,10 +347,12 @@ let u: Unit = Unit;
 *From: D17, D18.*
 
 **4.10.2** A type *mentions a reference* if it is a reference type, or is a
-`view` struct or `view` enum, or is a constructed type (tuple, array,
-optional, result, function pointer return or parameter) any of whose
-component types mentions a reference, or is a closure type that captures by
-reference. A struct or enum whose field or variant types, as written in the
+`view` struct or `view` enum, or is a constructed type (tuple, array, slice,
+optional, result) or a nominal type with a generic argument any of whose
+component types or arguments mentions a reference, or is a closure type that
+captures by reference. Function pointer types and `dyn` types never mention a
+reference: the regions in their signatures are higher-ranked (9.5.7), and a
+`dyn` type's own region is set by 9.5.6. A struct or enum whose field or variant types, as written in the
 declaration, mention a reference must be declared `view`; a `view` declaration
 whose fields mention no reference is an error. Generic type parameters do not
 count: `Vec[T]` is not declared `view`, but `Vec[&u8]` mentions a reference
@@ -393,7 +395,8 @@ compile-time constant of type `T`. Variants without an explicit value take
 the previous variant's value plus one, or 0 for the first. Tag values must be
 distinct and representable in `T`. Explicit tag values without a declared tag
 type are an error. An enum whose variants are all unit variants and that
-declares a tag type converts to its tag type with `as` (5.4.5).
+declares a tag type converts with `as` to its tag type and to any other
+integer type (5.4.5).
 
 ```tally
 enum Op: u8 { Nop = 0x90, Ret = 0xC3, Int3 = 0xCC }
@@ -422,9 +425,13 @@ argument, against the parameter's type; a `return` operand and a function's
 tail expression, against the return type; a struct literal field, against the
 field type; an array literal element, against the expected element type; a
 `break` operand, against the loop's or block's type when known; a match arm or
-`if` branch value, against the expression's expected type when known. At a
-coercion site, when both the expected type and the actual type are known and
-differ, the following coercions are tried, in this order:
+`if` branch value, against the expression's expected type when known; a tuple
+literal element, against the expected element type; a `const` or `static`
+initialiser, against the declared type; a closure body, against its declared
+return type. At a coercion site the actual type is first unified with the
+expected type; if unification fails, the following coercions are tried, in
+this order (an integer- or float-literal variable checked against `?T` or
+`T ! E` is unified with `T` and wrapped by rule 7):
 
 1. `never` to any type;
 2. `&mut T` to `&T`; `&T` or `&mut T` to `*T`; `&mut T` to `*mut T`;
@@ -445,9 +452,9 @@ If none applies the program has an error. Coercions do not chain except that
 rule 7 may follow one of rules 1–6 (`&mut T` to `?&T`).
 
 ```tally
-fn takes(s: &[]u8, o: ?&u32, w: &dyn Write may sys) { ... }
+fn takes(s: &[]u8, o: ?&u32, w: &mut dyn Write may sys | block) { ... }
 var arr: [4]u8 = [1; 4];
-takes(&arr, &n, &mut file);            // unsize; &u32 to ?&u32; &mut File to &dyn Write
+takes(&arr, &n, &mut file);            // unsize; &u32 to ?&u32; &mut File to &mut dyn Write
 let s: &str = &string;                 // deref coercion: &String to &str
 let w: u64 = small_u16;                // widening
 ```
@@ -531,9 +538,12 @@ const K = 3;                       // error: constant type required
 
 **4.13.2** Inference proceeds through a function body in source order,
 assigning each expression a type that may contain *inference variables*.
-There are three kinds of variable: general variables, integer-literal
-variables (which may be resolved only to an integer or float type), and
-float-literal variables (which may be resolved only to a float type). Each
+There are four kinds of variable: general variables, integer-literal
+variables (which may be resolved only to an integer or float type),
+float-literal variables (which may be resolved only to a float type), and
+const variables (which stand for the value of a `const` generic parameter and
+are resolved by unifying types that contain them, such as `[N]u8` with
+`[4]u8`). Each
 expression is checked against an *expected type* when its context provides
 one (a coercion site with a known target, an annotated binding, a parameter),
 and otherwise its type is inferred and then *unified* with what the context
@@ -543,7 +553,7 @@ the expected and the actual type have a known outermost constructor and they
 differ, a coercion is attempted instead of unification.
 
 ```tally
-let v = Vec.new();         // Vec[?a]
+var v = Vec.new();         // Vec[?a]
 v.push(7)?;                // ?a unified with integer-literal variable
 let w: u16 = v[0];         // resolves to u16
 ```
@@ -568,8 +578,9 @@ y.len();               // error: type of y must be known here; write `let y: Str
 
 **4.13.4** When a generic function or type is used without explicit
 arguments, a fresh general variable is created for each type parameter and
-each effect parameter, and each `const` parameter's value is inferred from the
-argument types. Trait bounds on the parameters are checked after the body has
+each effect parameter, and a const variable for each `const` parameter; they
+are resolved by unification with the argument types and the expected type of
+the call. Trait bounds on the parameters are checked after the body has
 been inferred, when the variables are resolved.
 
 ```tally

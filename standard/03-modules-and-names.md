@@ -21,7 +21,10 @@ name followed by the file's directory components and its name without `.tly`.
 The file `src/lib.tly` is the package's *root module* and its path is the
 package name alone. A directory and a file may share a name; `src/net.tly`
 (module `p.net`) and `src/net/tcp.tly` (module `p.net.tcp`) are distinct
-modules, and neither contains the other.
+modules, and neither contains the other. It is an error for a module to
+declare an item with the same name as a module whose path extends its own by
+one segment (`p.net` may not declare an item `tcp`), so that a path names at
+most one thing.
 
 ```text
 package "shapes":
@@ -59,7 +62,8 @@ fn b() -> u32 { 41 }
 **3.2.2** An item without `pub` is *package-visible*: it can be named from any
 module of the same package. An item with `pub` is *public*: it can be named
 from any package that depends on this one. `impl` items take no `pub`; their
-members do. Trait members, enum variants, and the fields of a union take the
+members of inherent impls do (7.3.1); members of trait impls take the trait's
+visibility (7.3.2). Trait members, enum variants, and the fields of a union take the
 visibility of their trait, enum or union. Struct fields are package-visible
 unless marked `pub`.
 
@@ -200,12 +204,17 @@ access or method call (5.6). If `a` resolves to a module, `.b` names an item
 of that module visible from here; if that item is itself a module, resolution
 continues the same way. If a prefix resolves to a type, the next `.name` names
 an associated item of the type (3.4.3) and further components are field
-accesses or method calls on the result. A chain in a type position is resolved
-the same way except that it must end at a type, trait or effect.
+accesses or method calls on the result. If a prefix resolves to a trait, the
+next `.name` names a member of the trait, called in qualified form (7.5.1).
+If a prefix resolves to a constant, static or function, the remaining
+components are field accesses or method calls on its value. A module path
+reaches only the items declared in (or re-exported by) that module, never a
+child module that it did not import (3.1.3). A chain in a type position is
+resolved the same way except that it must end at a type, trait or effect.
 
 ```tally
-import std;
-let f = std.fs.File.open("x");   // module std, module fs, type File, assoc fn open
+import std.fs;
+let f = fs.File.open("x");       // module fs, type File, associated function open
 let len = f.path.len();          // local f: field path, method len
 ```
 *From: D18, D13.*

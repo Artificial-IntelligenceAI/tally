@@ -575,7 +575,7 @@ pub trait Iterator {
     type Item;
     effect Next;
     fn next(&mut self) -> ?Self.Item may Self.Next;
-    // provided methods (Self: Sized where they take self by value):
+    // provided methods; each has an implicit `where Self: Sized` (7.8.1):
     fn count(self) -> usize may Self | Self.Item | panic { ... }
     fn last(self) -> ?Self.Item may Self | Self.Item { ... }
     fn nth(&mut self, n: usize) -> ?Self.Item may Self | Self.Item { ... }

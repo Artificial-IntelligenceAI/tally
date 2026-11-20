@@ -109,7 +109,8 @@ ParamList = Param % "," ;        (* accepts:  a: u8   and   a: u8, b: u8, *)
 example illustrates the rule it follows; if an example and the rule's prose
 disagree, the prose is authoritative. Comments in examples marked `error:`
 show where a diagnostic is required. Examples may omit `import` declarations
-and surrounding functions when they are obvious.
+and surrounding functions when they are obvious, and may show a function
+declaration ending in `;` instead of a body to show only its signature.
 
 ```tally
 let a = [1, 2, 3];

@@ -125,8 +125,12 @@ tally run --bin httpd -- --port 8080
 
 **21.3.4** `tally test [FILTER] [--exact] [--list] [--no-run]` builds the
 selected packages with `@cfg(test)` true and dev-dependencies available, and
-runs every `test` item whose name contains `FILTER` (or equals it, with
-`--exact`). Each test is run in its own process, so that a panic in one does
+runs every selected test. A test's *full name* is its module path, a space,
+and its string literal (`httpd.router "routes static files"`); two tests in
+one module with the same string are an error. A test is selected if its full
+name contains `FILTER` as a substring (or equals it, with `--exact`); with no
+`FILTER`, all are. `--list` prints the full names of the selected tests, one
+per line, in module-path then source order, and runs nothing. Each test is run in its own process, so that a panic in one does
 not affect the others, with at most `--jobs` running at once. A test body
 behaves as a function body whose return type is `()` or `() ! E` for some
 `E: Display` (inferred); a test *passes* if it returns `()` or `.Ok(())`, and
@@ -135,7 +139,9 @@ except that a test marked `@expect_panic` passes only if it panics (and, with
 `@expect_panic("text")`, only if the panic message contains `text`). For each
 test one line is printed: `test NAME ... ok`, `... FAILED`, or `... panicked`,
 followed by its captured output if it did not pass; then a summary line
-`N passed; M failed`. The exit status is 1 if any test failed.
+`N passed; M failed`, where `M` counts tests reported `FAILED` or `panicked`.
+Tests are reported in the order of `--list`. The exit status is 1 if any test
+failed.
 
 ```tally
 test "parse rejects empty" {
@@ -194,7 +200,13 @@ followed by the deepest call path, one function per line indented by two
 spaces, as `NAME (FRAME bytes)`, or the reason for `unbounded` (the recursive
 cycle without a limit, or the undeclared foreign function). `--json` prints
 one JSON object per function with keys `name`, `effects` (array of strings),
-`bound` (number or `null`) and `path`.
+`bound` (number or `null`) and `path` (array of objects with keys `name` and
+`frame`, or a string giving the reason for `unbounded`). A `QUALIFIED_NAME`
+is the module path and item name (`httpd.net.on_packet`); for methods, the
+type's path then the method (`httpd.Conn.close`, and `httpd.Conn.Drop.drop`
+for trait methods); generic instances append their type and const arguments
+in `.[ ]` (`core.alloc.Vec.push.[u8, Global]`); closures append
+`.{closure#N}`, numbered from 1 in source order within their function.
 
 ```text
 $ tally costs --path on_packet
@@ -209,13 +221,14 @@ httpd.net.on_packet	none	2312
 graph, one line `NAME VERSION SOURCE` followed by the set of effects that
 appear in the declared `may` clauses of its public functions and in its
 foreign declarations and `asm` expressions, and the number of `unsafe`
-blocks it contains; packages whose public functions include `sys` are listed
-first.
+blocks it contains. `SOURCE` is the lock-file source string (18.4.4), or the
+directory for path dependencies. Packages whose effects include `sys` are
+listed first; within each group, packages are sorted by name, then version.
 
 ```text
 $ tally audit
+tls 2.1.0 git+https://example.org/libs#dir=tls  effects: alloc | block | panic | sys  unsafe: 41
 json 0.9.1 git+https://example.org/json  effects: alloc | panic  unsafe: 0
-tls 2.1.0 git+https://example.org/libs/tls  effects: alloc | block | panic | sys  unsafe: 41
 ```
 *From: D3, D44.*
 
@@ -224,7 +237,11 @@ interface of the selected package (21.3.11) as JSON. `tally api diff OLD NEW`
 compares two such descriptions (or two git revisions, written `git:REV`) and
 prints each difference with its classification, `breaking` or `compatible`,
 and finally the smallest version increment (`major`, `minor` or `patch`) that
-semantic versioning requires.
+semantic versioning requires. For a package below 1.0.0 the increments are
+shifted, following the compatibility lines of 18.4.1: on `0.MINOR` (minor at
+least 1), a breaking change requires a new minor version and anything else a
+new patch version; on `0.0.PATCH`, every release is a new compatibility line,
+so any change is allowed in any increment.
 
 ```text
 $ tally api diff git:v1.4.2 git:HEAD
@@ -240,8 +257,8 @@ for functions, the full signature including generic bounds, `from` and `may`
 clauses; for structs and enums, their generic parameters, public fields and
 all variants, whether they are `view`, `@non_exhaustive`, `Copy`, `Send` and
 `Sync`, and, if every field is public, their size, alignment and field
-offsets on each of the targets the package lists in `x-api-targets` (default:
-the host); for traits, all members; and every impl of a public trait for a
+offsets on each of the targets the package lists in the `[package]` key
+`api-targets` (an array of target triples; default: the host); for traits, all members; and every impl of a public trait for a
 public type. A change is *breaking* if it can make a program that compiled
 against the old version fail to compile or change meaning against the new
 one. In particular the following are breaking: removing or renaming a public
@@ -268,7 +285,8 @@ pub fn lookup(k: u32) -> ?u32 may alloc { ... }
 that `VERSION` is greater than the latest version tag, that the manifest's
 `version` equals `VERSION`, that the package builds and its tests pass, and
 that `tally api diff` between the latest version tag and the working tree
-requires no larger increment than `VERSION` makes; then it creates the local
+requires no larger increment than `VERSION` makes (this check is skipped when
+there is no earlier version tag); then it creates the local
 git tag `vVERSION` (or `DIR/vVERSION`). It never pushes.
 
 ```text
@@ -325,8 +343,10 @@ imports, and trailing commas.
    expression and no statements may stay on one line if it fits.
 6. Binary operators, `=`, `=>`, `->`, `|` in effect clauses and `!` in result
    types are surrounded by one space; no space inside `()`, `[]`, or after
-   prefix operators, or before `,`, `;`, `:`, `?`, `.`; one space after `,`
-   and `:`.
+   prefix operators, or before `,`, `;`, `:`, `?`, or a `.` that follows an
+   expression; one space after `,` and after a `:` that ends a name. A `.`
+   beginning an inferred variant (`= .None`) and the `:` of a label reference
+   (`break :outer`) are preceded by one space and followed by none.
 7. When a list (parameters, arguments, generic arguments, struct fields,
    array elements, match arms' tuple patterns) does not fit on its line, it is
    written one element per line, each followed by a comma, indented one
@@ -341,9 +361,12 @@ imports, and trailing commas.
     level of the following code.
 
 ```tally
-pub fn copy_range(src: &[]u8, dst: &mut []u8, start: usize, end: usize) -> usize ! CopyError
-    may panic
-{
+pub fn copy_range(
+    source_buffer: &[]u8,
+    destination_buffer: &mut []u8,
+    start: usize,
+    end: usize,
+) -> usize ! CopyError may panic {
     ...
 }
 ```
@@ -355,7 +378,10 @@ pub fn copy_range(src: &[]u8, dst: &mut []u8, start: usize, end: usize) -> usize
 `x86_64-linux-gnu`, `aarch64-macos-none`, `x86_64-windows-msvc`,
 `riscv64-linux-musl`, `thumbv7em-none-eabihf`, `wasm32-wasi-none`). The
 implementation documents which targets it supports; for each, the values of
-the `@cfg` predicates (16.2.2) and the `core.target` constants.
+the `@cfg` predicates (16.2.2) and the `core.target` constants. The `ARCH`
+part of a triple may name a sub-architecture (`thumbv7em`, `armv7`, `i686`);
+the implementation documents the `arch(...)` value each maps to (for
+example `thumbv7em` and `armv7` to `arm`, `i686` to `x86`).
 
 ```text
 tally build --target riscv64-linux-musl

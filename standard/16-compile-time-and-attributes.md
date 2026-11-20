@@ -57,7 +57,8 @@ const K2: Vec[&str] = make_keywords().unwrap();          // error: const holds a
 
 **16.1.4** Evaluation is deterministic: its result depends only on the source,
 the target and the configuration (features, profile). An implementation must
-support evaluations of at least 10 000 000 primitive steps and 64 MiB of
+support evaluations of at least 10 000 000 steps (one step is the execution
+of one CFG point, 9.2.1) and 64 MiB of
 compile-time heap per constant; it may document larger limits. Exceeding its
 limits is an error.
 
@@ -198,14 +199,16 @@ same trait for every type parameter. The generated behaviour is:
 * `Eq`: makes the type comparable (5.5.1).
 * `Ord` (requires `Eq`): compares field by field in declaration order, the
   first unequal field deciding; for enums, compares tag values first (in
-  declaration order when no tag values are given), then fields.
+  declaration order when no tag values are given), then fields. The impl's
+  `Cmp` effect is the union of the fields' `Cmp` effects.
 * `Hash`: feeds each field to the hasher in declaration order; for enums, the
   tag value (as `u64`) first.
 * `Default`: for a struct, every field's `Default`; for an enum, the unit
   variant marked `@default` (required).
 * `Debug`: writes the type name, then `{ f1: v1, f2: v2 }` for named fields,
   `(v1, v2)` for positional fields, or nothing for unit structs and variants
-  (enum values write the variant name instead of the type name); field values
+  (enum values write `.` and the variant name instead of the type name, as in
+  `.Some(3)`); field values
   use `Debug`; strings and characters are written quoted with escapes as in
   1.4.4.
 

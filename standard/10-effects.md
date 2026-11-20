@@ -75,7 +75,12 @@ fn save(t: &mut store.Txn) ! store.Error may store.disk_write | sys | block { st
 * the name of a type parameter `T` in scope, or `Self` inside a trait or
   impl, standing for the *type effects* of that type (10.2.4);
 * `T.Name` or `Self.Name`, standing for the associated effect `Name` of
-  that type, from the unique bound of `T` that declares it.
+  that type, from the unique bound of `T` that declares it;
+* `T.Name` or `Self.Name` where `Name` is an associated *type*, standing for
+  the type effects (10.2.4) of that associated type with respect to the
+  bounds declared on it (for an unbounded associated type, its drop effects).
+  Library signatures use this for items that a method drops, as in
+  `count(self) -> usize may Self | Self.Item | panic`.
 
 ```tally
 fn f[T: Iterator + Clone, effect E](t: T, g: fn() may E) may T.Next | E | panic { ... }

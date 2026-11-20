@@ -75,7 +75,7 @@ provides them.
 
 **17.3.1** On targets whose operating system is `none`, a binary cannot use
 `std` and does not have `main`. Instead it has exactly one function marked
-`@entry`, of type `fn() -> never`, which is called after the platform start-up
+`@entry`, with no parameters and return type `never` (and any effects), which is called after the platform start-up
 code has initialised memory. The program must define a `@panic_handler`
 (12.4.4), and, if any function in it has the `alloc` effect, a
 `@global_allocator` (19.13.5); otherwise linking fails.

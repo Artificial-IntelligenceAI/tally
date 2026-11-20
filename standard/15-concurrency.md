@@ -80,7 +80,7 @@ let rc = Rc.new(5)?;
 thread.spawn(move || print(*rc));      // error: Rc[i64] is not Send
 _ = fiber.run_all([move || print(*rc)].into_iter());  // fine: fibers stay on this thread
 ```
-*From: D26, D34.*
+*From: D26, D34, D66.*
 
 ## 15.3 The memory model
 

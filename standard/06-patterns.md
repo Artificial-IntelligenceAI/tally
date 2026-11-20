@@ -53,6 +53,7 @@ let (x, _) = pair;
 *From: D60, D25.*
 
 **6.2.3** A literal pattern matches a value equal to the literal (by `==`).
+A literal pattern whose type resolves to a float type is an error.
 Integer, character, byte, boolean, string and byte string literals are
 allowed; a `-` may precede integer literals. Float literals are not allowed in
 patterns. A string literal pattern matches `&str` (or `str` behind a

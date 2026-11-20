@@ -165,7 +165,8 @@ let len = { let s = name(); &s }.len();   // error: block tail borrows s, which 
 
 **8.4.3** Temporaries created while evaluating the scrutinee of a `match` or
 `if let` are dropped at the end of the `match` or `if let` expression; those of
-a `while let` scrutinee at the end of each iteration (or when the loop exits).
+a `while let` scrutinee at the end of each iteration (or when the loop exits);
+those of a `for` loop's iterable expression when the loop ends (5.10.6).
 
 ```tally
 match lock.guard().state {      // the guard lives until the end of the match

@@ -139,11 +139,14 @@ impl u32 { fn twice(self) -> u32 { self * 2 } }     // error outside core
 
 **7.3.2** A *trait impl* `impl[P] Trait[args] for Type { ... }` declares that
 `Type` implements `Trait`. It must define every member of the trait that has
-no default, and may override members that have one; it must not define
+no default (except associated effects that 10.4.5 lets it omit), and may
+override members that have one; it must not define
 anything the trait does not declare. Each method's signature, after
 substituting `Self` and the trait's generic arguments, must have the same
 parameter and return types as the trait's declaration, a `from` clause naming
-at most the sources the trait's clause names, and an effect set within the
+at most the sources the trait's clause names (where the trait's return type is
+an associated type that the impl binds to a type with elided regions, any
+sources 9.5.3 allows), and an effect set within the
 trait's declared effects (10.5.1). Trait impl members are as visible as the
 trait; they take no `pub`.
 
@@ -350,8 +353,9 @@ fn twice[F: FnMut()](var f: F) may F { f(); f(); }
 *From: D54, D30.*
 
 **7.7.2** The bound `Fn(A, B) -> R may E` is shorthand for
-`Fn[(A, B), Output = R, Call = E]`, and likewise for `FnMut` and `FnOnce`. A
-missing `-> R` means `Output = ()`. A missing effect clause leaves `Call`
+`Fn[(A, B), Output = R, Call = E]`, and likewise for `FnMut` and `FnOnce`;
+one parameter gives `Args = (A,)` and none gives `()`. A missing `-> R` means
+`Output = ()`. A missing effect clause leaves `Call`
 unbound (generic), so the effects of calling `F` are written `F` (10.2.3).
 The same shorthand is allowed after `dyn`, where a missing effect clause means
 `may none`.
@@ -365,8 +369,11 @@ let cb: Box[dyn FnMut(u32) may sys] = Box.new(move |n| log(n))?;
 ## 7.8 Trait objects
 
 **7.8.1** A trait is *object-safe* if: every method has a receiver `&self` or
-`&mut self` (associated functions with `where Self: Sized` are exempt and
-unavailable on the object); no method has type parameters or const
+`&mut self` (methods and associated functions with `where Self: Sized` are
+exempt and unavailable on the object; the provided methods of `Iterator` in
+19.10.1 that take `self` by value or have type parameters carry this
+clause); `FnOnce.call_once` is the exception: `Box[dyn FnOnce(...)]` is
+callable, which moves the boxed closure out and frees the box; no method has type parameters or const
 parameters (effect parameters are allowed, 10.5.4); `Self` does not appear in
 any method's parameters or return type except as the receiver; the trait has
 no associated constants; and its supertraits are object-safe. Only
@@ -374,7 +381,7 @@ object-safe traits may appear after `dyn`.
 
 ```tally
 pub trait Write { effect Io; fn write(&mut self, b: &[]u8) -> usize ! Error may Self.Io; }
-let w: &mut dyn Write may sys = &mut file;          // fine
+let w: &mut dyn Write may sys | block = &mut file;  // fine
 let c: &dyn Clone = &x;                              // error: Clone returns Self
 ```
 *From: D27.*
@@ -456,7 +463,7 @@ arguments.
 
 ```tally
 fn id[T](x: T) -> T { x }
-id(1); id(1.0);          // two instances: id[i64], id[f64]
+_ = id(1); _ = id(1.0);  // two instances: id[i64], id[f64]
 fn run[effect E](f: fn() may E) may E { f() }
 run(a); run(b);          // one instance, whatever the effects of a and b
 ```

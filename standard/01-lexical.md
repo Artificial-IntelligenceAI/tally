@@ -139,9 +139,10 @@ pub fn parse(src: &[]u8) -> Token from src may panic { ... }   // `from`, `may` 
 *From: D3, D28, D31.*
 
 **1.3.4** The names of the primitive types (4.2.1, 4.3.1, 4.4.1), `never`
-(4.5.3), and the names in the prelude (19.1.2) are *predeclared
+(4.5.3), the names `f16`, `bf16` and `f128` (reserved for possible future
+float types, 22.3.5), and the names in the prelude (19.1.2) are *predeclared
 identifiers*. They are not keywords. Declaring an item whose name is a
-primitive type name or `never` is an error. Other predeclared names may be
+primitive type name, a reserved float name, or `never` is an error. Other predeclared names may be
 shadowed (3.4.4).
 
 ```tally

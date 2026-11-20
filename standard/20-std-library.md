@@ -357,7 +357,7 @@ thread.scope(&table, |s| {
     for q in 0..8 { _ = s.spawn(move |s| answer(s.env(), q)); }   // shared read-only access
 });
 ```
-*From: D34, D33.*
+*From: D34, D33, D66.*
 
 ## 20.8 Fibers
 
@@ -398,7 +398,7 @@ fn serve_all(addr: SocketAddr, cfg: &Config) ! AppError may sys | block | alloc 
     })?
 }
 ```
-*From: D34.*
+*From: D34, D66.*
 
 **20.8.2** `Scope.spawn(f)` allocates a stack of exactly
 `stack.bound_required(&f) + CONTEXT_OVERHEAD` bytes (rounded up to the
