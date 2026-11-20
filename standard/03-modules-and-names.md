@@ -107,9 +107,10 @@ struct run;        // error: `run` is already declared
 ## 3.3 Imports
 
 **3.3.1** The first identifier of an import path must be one of: `core`,
-`std`, the name of the current package, or the local name of a dependency
-declared in the package manifest (18.4.1). Otherwise the import is an
-error. The remaining identifiers name a module, then optionally an item
+`std`, the name of the current package or `this` (which means the current
+package, 18.3.2), `bin` inside a binary target (18.3.3), or the key of a
+dependency declared in the package manifest (18.2.3). Otherwise the import is
+an error. The remaining identifiers name a module, then optionally an item
 within that module.
 
 ```tally

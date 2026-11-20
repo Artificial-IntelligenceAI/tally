@@ -1059,3 +1059,140 @@ special registers, system calls). Rust's operand syntax is the most readable
 existing design and maps onto LLVM directly. The effect and stack clauses are
 needed for cost accounting, because the compiler cannot analyse the assembly
 text.
+
+---
+
+## D40. Compile-time evaluation is decided by effects; no macros
+
+**Chosen.** Constants, static initialisers, array lengths and const generic
+arguments are evaluated at compile time by running ordinary Tally code in an
+interpreter. A function may be called at compile time exactly when its effect
+set is within `alloc | panic`; no `const fn` marker exists. A panic during
+evaluation is a compile error. Static initialisers may build heap data, which
+becomes read-only static data. Tally has no macro system.
+
+**Alternatives weighed.** Rust's `const fn` (a separate, growing subset of the
+language marked function by function) and `macro_rules!`/procedural macros;
+Zig's `comptime` (types as values, duck-typed generics); C++'s `constexpr`
+plus templates; C's preprocessor.
+
+**Why.** The effect system already says which functions interact with the
+outside world, which is exactly the property that makes compile-time
+evaluation impossible or non-reproducible, so a second marker would duplicate
+it. Macros give great power but hurt local reasoning (D2.3) and tooling
+(D2.5): code that the reader sees is not the code that runs, and every tool
+must expand macros to understand a program. The needs that macros serve in
+Rust are covered in Tally by built-in derives (D41), rest parameters (D47),
+generators (D45) and generics. The loss is real for embedded DSLs and for
+user-defined derives, which need a generator step instead.
+
+---
+
+## D41. Derives are built in; other code generation is a build step
+
+**Chosen.** `@derive(...)` supports exactly the core traits `Copy`, `Clone`,
+`Eq`, `Ord`, `Hash`, `Default` and `Debug`, with fully specified output. Any
+other generated code (serialisation, bindings, parsers from grammars) is
+produced by *generators*: ordinary programs, declared in the manifest, that
+the build runs in a sandbox to write Tally source files that are then
+compiled like hand-written ones.
+
+**Alternatives weighed.** User-defined derive macros (Rust's procedural
+macros); compile-time reflection (Zig's `@typeInfo`, C++26 reflection);
+external code generators run by hand (Go's `go generate`).
+
+**Why.** The core derives cover the traits almost every type wants, and
+specifying their output exactly keeps them predictable. Procedural macros run
+arbitrary code inside the compiler with full access to the machine, which is a
+supply-chain risk and makes builds slow and non-reproducible. Generators keep
+the power but make the generated code visible as files, run without network or
+file system access beyond their inputs, and are cached by input hash.
+Reflection was the strongest alternative; it was rejected for this version
+because it ties library behaviour to the shape of types in ways that are hard
+to version (chapter 22 records it as open).
+
+---
+
+## D42. Conditional compilation with `@cfg` predicates
+
+**Chosen.** Items, fields, variants, match arms, members and statements can
+carry `@cfg(predicate)`; elements whose predicate is false are removed before
+name resolution. Predicates test the target (`os`, `arch`, `family`,
+`endian`, `pointer_width`, `env`), features, the profile, `test` and
+`debug_assertions`, combined with `all`, `any` and `not`. Target facts are
+also available as constants in `core.target` for code that should be
+type-checked on every target.
+
+**Alternatives weighed.** A preprocessor (C); compile-time `if` over constants
+only (Zig), which requires both branches to type-check, making
+platform-specific APIs awkward; Rust's `#[cfg]`, which this follows.
+
+**Why.** Systems code must call APIs that do not exist on every target, so
+some removal before type checking is required; attaching it to syntax
+elements (not text) keeps tools able to parse every file. Offering constants
+too lets code that can be portable stay checked everywhere.
+
+---
+
+## D43. Packages: decentralised sources, minimal version selection, hash-locked
+
+**Chosen.** A package is a directory with a `tally.toml` manifest (TOML) and a
+`src/` directory. Dependencies are named by source location (a git URL or a
+local path) and a minimum version. A package's identity is its source plus its
+compatibility line (major version, or `0.minor` before 1.0), so different major
+versions of a package can coexist. Versions are chosen by minimal version
+selection: for each identity, the highest of the minimum versions that any
+package in the graph requires. `tally.lock` records the selected versions and
+a SHA-256 content hash of each, and builds verify the hashes.
+
+**Alternatives weighed.** A central registry with SAT-style "newest
+compatible" resolution (Cargo, npm); Go's module system (decentralised, MVS,
+checksum database), which this mostly follows; vendoring only; header-only
+distribution (C).
+
+**Why.** Minimal version selection gives reproducible builds without a
+lockfile, never picks a version nobody tested against, and needs no solver;
+newest-compatible resolution makes the build change when someone else
+publishes. Content hashes make a fetched dependency verifiable regardless of
+where it was fetched from. A central registry was not required for the
+language to function, so it is left open (chapter 22) rather than designed
+in; the cost is that discovery and name squatting are not addressed yet.
+
+---
+
+## D44. API compatibility is checked by the toolchain, effects included
+
+**Chosen.** `tally api` extracts a package's public interface (items,
+signatures, effects, trait impls, layouts of public types with public fields)
+and compares two versions, classifying each change as compatible or breaking
+under semantic versioning. Adding an effect to a public function, removing a
+public item, or changing a public type's layout are breaking. `tally release`
+refuses to tag a version whose number does not match the changes.
+
+**Alternatives weighed.** Relying on authors to follow semver by hand (most
+ecosystems); external tools (`cargo-semver-checks`).
+
+**Why.** Minimal version selection (D43) and the promise that effects are
+contracts (D29) both depend on versions meaning what they say. Making the
+check part of the toolchain means the effect half of the major feature is
+enforced across package versions, not only within a build.
+
+---
+
+## D45. Builds are declarative; there are no build scripts
+
+**Chosen.** The manifest describes everything the build does: Tally sources
+are found by layout, C sources and libraries to link are listed, and
+generators (D41) are declared with their inputs and outputs. No package can
+run arbitrary code during a dependent's build except declared generators,
+which run sandboxed (no network, read access only to declared inputs, write
+access only to their output directory).
+
+**Alternatives weighed.** Build scripts in the language (Rust's `build.rs`,
+Zig's `build.zig`); external build systems (Make, CMake, Bazel).
+
+**Why.** Build scripts are the largest supply-chain attack surface in modern
+package ecosystems and make builds unreproducible and hard for tools to
+understand. Declarative builds cover the common needs (compiling bundled C,
+linking system libraries, generating code). The loss is flexibility for
+unusual builds, which must use an external build system around `tally`.

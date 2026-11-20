@@ -35,7 +35,7 @@ All imports come before all items.
 //! A small HTTP server.
 import std.io;
 import std.net.{TcpListener, TcpStream as Stream};
-pub import this_pkg.util.Buffer;
+pub import this.util.Buffer;
 fn main() {}
 import std.fs;     // error: import after an item
 ```
@@ -460,8 +460,8 @@ AttrArg     = [ IDENT "=" ] Expr ;
 ```
 
 An attribute argument is parsed as an expression; its meaning is given by the
-attribute (chapter 16). Statement attributes may only be `@cfg` (16.3.1) and
-`@allow` (16.4.5).
+attribute (chapter 16). Statement attributes may only be `@cfg` (16.2.1) and
+`@allow` (16.3.5).
 
 ```tally
 @derive(Clone, Eq, Debug)

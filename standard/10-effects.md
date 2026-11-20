@@ -194,7 +194,7 @@ let x = unsafe may none { fast_path_that_never_allocates(v) };
 ```
 *From: D3, D36.*
 
-**10.3.7** Code excluded by `@cfg` (16.3) contributes nothing. Effects are
+**10.3.7** Code excluded by `@cfg` (16.2) contributes nothing. Effects are
 computed after `@cfg` evaluation for the current target and configuration, so
 a function may have different effects on different targets; a public
 function's declared effects must cover its body on every target it is built
@@ -403,7 +403,7 @@ that installs it (chapters 15 and 17); exceeding the limit is an error at the
 installation site.
 
 ```tally
-@interrupt("TIMER0") fn tick() may none { ... }        // interrupt handlers: limited to none | sys (17.4.2)
+@interrupt("TIMER0") fn tick() may none { ... }        // interrupt handlers: no alloc, no block (17.4.2)
 thread.spawn(move || serve(conn))?;                    // threads: any built-in effects
 ```
 *From: D3, D34.*

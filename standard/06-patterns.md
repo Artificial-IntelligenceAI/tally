@@ -230,7 +230,7 @@ match c { 'a' | 'a' => ... , _ => ... }   // error: second alternative unreachab
 ```
 *From: D60, D2.*
 
-**6.4.3** An enum declared with `@non_exhaustive` (16.4.4) is treated, outside
+**6.4.3** An enum declared with `@non_exhaustive` (16.3.4) is treated, outside
 the package that declares it, as if it had additional unknown variants: a
 `match` on it in another package must have an arm that matches every value
 (for example `_`). Inside its own package it is matched normally.

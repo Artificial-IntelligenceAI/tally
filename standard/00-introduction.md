@@ -73,7 +73,7 @@ implementation* accepts every well-formed program within its documented
 resource limits, rejects every program with an error, and gives every
 well-formed program the behaviour this standard defines. A conforming
 implementation may provide extensions only through attributes in the
-`@vendor_*` namespace (16.4.6) and through additional toolchain commands; it
+`@vendor_*` namespace (16.3.2) and through additional toolchain commands; it
 must not change the meaning of any well-formed program.
 
 ```tally

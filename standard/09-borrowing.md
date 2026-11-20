@@ -331,7 +331,7 @@ inc();
 **9.6.1** The drop glue of type `T` *uses* region ρ if `T`'s glue includes a
 `Drop.drop` call for a type `U` in which ρ occurs, other than solely within
 type arguments for which `U`'s `Drop` impl is marked `@drop_ignores(T)`
-(16.4.7). Dropping a value whose type has no `Drop` impl in its glue uses no
+(16.3.1). Dropping a value whose type has no `Drop` impl in its glue uses no
 regions.
 
 ```tally

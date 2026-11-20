@@ -64,7 +64,7 @@ other comments are ignored. There are no block comments.
 of the line after `///`, with one leading space removed if present.
 Consecutive `DOC` tokens with nothing but whitespace between them are joined
 into one `DOC` token, their texts separated by LF. A `DOC` token is treated as
-the attribute `@doc("text")` (16.4.1) applied to the following item, field,
+the attribute `@doc("text")` (16.3.1) applied to the following item, field,
 variant, or trait or impl member. A `DOC` token anywhere else is an error.
 Inner doc comments produce an `INNER_DOC` token, joined the same way, which
 may appear only at the start of a file and documents the module.

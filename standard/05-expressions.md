@@ -223,7 +223,7 @@ let none = Op.from_tag(0);       // .None
 `()` or `never`; a raw pointer or function pointer (compared by address); a
 reference `&T` or `&mut T` to a comparable `T` (compared by the referenced
 values); an array or slice of a comparable type, or `str`; a tuple of
-comparable types; or a struct or enum declared with `@derive(Eq)` (16.4.3)
+comparable types; or a struct or enum declared with `@derive(Eq)` (16.3.3)
 whose field types are all comparable for the given generic arguments. Unions,
 closures, function items and `dyn` types are never comparable. `Option[T]` and
 `Result[T, E]` are declared with `@derive(Eq)`.
