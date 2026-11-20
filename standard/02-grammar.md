@@ -58,7 +58,7 @@ StructDecl  = [ "view" ] "struct" IDENT [ GenericParams ] [ WhereClause ]
 FieldDecl   = { Attribute } [ "pub" ] IDENT ":" Type ;
 TupleField  = { Attribute } [ "pub" ] Type ;
 
-EnumDecl    = "enum" IDENT [ GenericParams ] [ ":" Type ] [ WhereClause ]
+EnumDecl    = [ "view" ] "enum" IDENT [ GenericParams ] [ ":" Type ] [ WhereClause ]
               "{" [ Variant % "," ] "}" ;
 Variant     = { Attribute } [ "from" ] IDENT
               [ "(" Type % "," ")" | "{" [ FieldDecl % "," ] "}" ]

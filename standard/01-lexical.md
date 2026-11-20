@@ -126,7 +126,7 @@ identifiers except in the grammar positions listed, where the grammar
 | `stack` | inside an `asm` expression head |
 | `test` | at the start of an item, followed by a string literal |
 | `union` | at the start of an item, followed by an identifier |
-| `view` | at the start of an item, followed by `struct` |
+| `view` | at the start of an item, followed by `struct` or `enum` |
 
 A contextual keyword used as a name elsewhere is an ordinary identifier, with
 two exceptions: an effect may not be named `any` or `none`, and no item may
@@ -139,7 +139,7 @@ pub fn parse(src: &[]u8) -> Token from src may panic { ... }   // `from`, `may` 
 *From: D3, D28, D31.*
 
 **1.3.4** The names of the primitive types (4.2.1, 4.3.1, 4.4.1), `never`
-(4.8.1), and the names in the prelude (19.1.2) are *predeclared
+(4.5.3), and the names in the prelude (19.1.2) are *predeclared
 identifiers*. They are not keywords. Declaring an item whose name is a
 primitive type name or `never` is an error. Other predeclared names may be
 shadowed (3.4.4).
@@ -164,7 +164,7 @@ BIN_LIT = "0b" [01]   { ["_"] [01] } ;
 Underscores may appear only between two digits. A decimal literal with a
 leading zero (`012`) is an error. Integer literals have no sign and no type
 suffix; `-1` is the negation operator applied to `1`, and the literal's type
-comes from context (4.2.6). The value of an integer literal may be arbitrarily
+comes from context (4.2.4). The value of an integer literal may be arbitrarily
 large; whether it fits is checked when its type is known.
 
 ```tally

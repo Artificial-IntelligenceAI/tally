@@ -48,7 +48,7 @@ diagnostic that does not prevent compilation; which warnings exist is
 implementation-defined unless the standard names them.
 
 ```tally
-let x: u8 = 300;   // error: the literal 300 is not representable in u8 (4.2.6)
+let x: u8 = 300;   // error: the literal 300 is not representable in u8 (4.2.4)
 ```
 *From: D6.*
 

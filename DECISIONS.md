@@ -404,3 +404,151 @@ everything inside `.[ ]` is parsed as types. Explicit arguments are rare in
 expressions because local inference (D63) usually finds them, so the extra
 dot is seldom written. This is the same idea as Rust's turbofish with a
 lighter spelling.
+
+---
+
+## D14. Integer types, including arbitrary widths; literals default to `i64`
+
+**Chosen.** Tally has signed and unsigned integers of every width from 1 to
+128 bits (`u1` … `u128`, `i1` … `i128`), plus `usize` and `isize`, which have
+the width of a pointer. There is no `int` type whose size varies by target.
+Integer literals have no type of their own: they take the type their context
+requires, and a literal whose type is not determined by anything defaults to
+`i64`.
+
+**Alternatives weighed.** Only the power-of-two widths (C, Rust, Go); a
+platform-sized default `int` (C, Go); a 32-bit default (Rust's `i32`); type
+suffixes on literals (`5u8`, Rust).
+
+**Why.** Odd widths describe hardware registers, protocol fields and packed
+formats exactly (`u3` for a 3-bit field), which is control (D2.4); Zig has
+shown they are practical, and LLVM supports them directly. A target-sized
+default would give the same source different overflow behaviour on different
+targets, which violates predictability (D2.1). `i64` is chosen over `i32`
+because overflow is checked (D15) and a 64-bit default makes accidental
+overflow on counts and sizes rare on every target; on 32-bit targets the cost
+is acceptable because hot code names its types. Suffixes are unnecessary
+because context almost always fixes the type, and `as` handles the rest.
+
+---
+
+## D15. Arithmetic is checked in every build; wrapping and saturating are separate operators
+
+**Chosen.** `+`, `-`, `*`, `/`, `%`, unary `-`, and `<<`/`>>` with an
+out-of-range shift amount panic when the mathematical result is not
+representable (or on division by zero). The panic happens in every build
+profile. Wrapping arithmetic is written `+%`, `-%`, `*%`; saturating
+arithmetic is written `+|`, `-|`, `*|`. Checked arithmetic returning an
+optional is a library method (`a.checked_add(b)`).
+
+**Alternatives weighed.** Rust's model (panic in debug builds, wrap in release
+builds); C's model (signed overflow is undefined behaviour, unsigned wraps);
+always wrapping (Go, Java); Zig's model (undefined in release-fast).
+
+**Why.** A program whose meaning changes with the optimisation level is not
+predictable (D2.1): Rust's release builds silently wrap where debug builds
+panic, so tests can pass on behaviour that production does not have. Undefined
+overflow is unsound (D2.2). Always wrapping hides bugs. Checking always has a
+small run-time cost that compilers remove when they can prove the range; where
+it matters, the programmer writes `+%` and the intent is visible in the source.
+The cost is that most arithmetic carries the `panic` effect (D3), which is
+honest: such code *can* crash.
+
+---
+
+## D16. Conversions: `as` is checked, `as%` truncates, widening is implicit
+
+**Chosen.** `x as T` converts between numeric types and panics if the value is
+not representable in `T` (for floats converted to integers: if it is NaN or
+out of range after truncation toward zero). `x as% T` converts between
+integer types by keeping the low bits (two's complement truncation or
+extension). A conversion that can never lose information (a narrower integer
+to a wider integer of compatible signedness, `f32` to `f64`) happens
+implicitly at *coercion sites* (assignment, argument passing, return, struct
+fields, array elements), but never between the operands of a binary operator.
+
+**Alternatives weighed.** Rust's `as`, which truncates and saturates silently;
+Zig's family of builtins (`@intCast`, `@truncate`, `@floatFromInt` …);
+C's implicit conversions including narrowing; no implicit widening at all
+(Rust).
+
+**Why.** A conversion that silently changes a value is a classic source of
+bugs in systems code (lengths truncated to 16 bits, negative values becoming
+huge sizes). Making the common spelling checked follows D15, and making the
+bit-level truncation a distinct, visible operator keeps it available for
+hashing and protocol code. Implicit widening removes noise that carries no
+information, and limiting it to coercion sites keeps binary operators simple:
+`a + b` requires both operands to have the same type, so a reader never has to
+work out which operand was widened.
+
+---
+
+## D17. No operator overloading; `==` is structural
+
+**Chosen.** Operators have fixed meanings on built-in types and cannot be
+defined for user types. `==` and `!=` are defined for every type whose values
+are made of comparable parts (integers, floats, `bool`, `char`, raw pointers
+by address, references by the value they refer to, arrays, slices, `str`,
+tuples, structs and enums whose fields are all comparable and that declare
+`@derive(Eq)`), and compare structurally. Ordering operators work only on
+numbers, `char` and `bool`. Other comparisons and arithmetic on user types are
+ordinary method calls (`a.cmp(b)`, `v.add(w)`).
+
+**Alternatives weighed.** Full operator overloading through traits (Rust,
+C++); overloading only for arithmetic traits; no `==` on aggregates (Zig).
+
+**Why.** An operator that may run arbitrary user code (allocate, lock, panic)
+breaks the rule that costs are visible at the call (D2.1, D2.3). With effects
+this could be tracked, but a reader skimming `a + b` would still not expect
+a function call. The loss is real for numeric code (vectors, matrices, big
+integers), which becomes more verbose; Tally accepts that because numeric
+library code is a minority of systems code. Structural equality covers the
+most common need (comparing keys, tags and records) without user code and
+with a cost that is obvious from the type.
+
+---
+
+## D18. Files are modules; one namespace; two visibility levels
+
+**Chosen.** Every source file is a module, and its path in the package's
+source directory is its module path; there are no module declarations.
+Each module has a single namespace for types, functions, constants, modules
+and all other items. An item is visible either throughout its package
+(the default) or to every package (`pub`). Other modules' items are reached
+only through `import`.
+
+**Alternatives weighed.** Rust's explicit module tree with `mod`
+declarations, separate type and value namespaces, and five visibility levels;
+Go's directory-as-package with capitalisation-based export; Zig's
+files-as-structs.
+
+**Why.** Deriving modules from files removes a class of "where is this
+defined" questions (D2.3) and keeps tools simple (D2.5). A single namespace
+means a name in a scope denotes exactly one thing. Two visibility levels match
+the unit that matters for cost accounting: effects are inferred inside a
+package and declared at its boundary (D29), so "package" and "public" are the
+boundaries that need distinguishing. Finer levels are rarely worth their
+complexity; a large package that needs internal walls should be split.
+Explicit `pub` was chosen over capitalisation so that renaming for style
+never changes visibility.
+
+---
+
+## D19. Optional and result types are ordinary enums with short syntax
+
+**Chosen.** `?T` is the type `Option[T]` with variants `None` and `Some(T)`.
+`T ! E` is `Result[T, E]` with variants `Ok(T)` and `Err(E)`. They are
+declared in `core` as normal enums and get pattern matching, methods and
+layout like any enum. Three conversions happen implicitly at coercion sites:
+`T` to `?T` (as `.Some`), `T` to `T ! E` (as `.Ok`), and `never` to anything.
+The absent value is written `.None`; there is no null.
+
+**Alternatives weighed.** Separate built-in optional and error-union types with
+their own rules (Zig); no implicit wrapping (Rust); nullable pointers (C, Go).
+
+**Why.** Using ordinary enums means no special cases in pattern matching,
+generics or layout, and readers already know how enums behave (D2.3).
+Wrapping a successful or present value is the overwhelmingly common case and
+carries no information, so it is implicit; failure and absence are always
+written out, so the unusual path is the visible one. Implicit wrapping never
+runs user code and has a fixed cost, so it does not weaken D2.1.
