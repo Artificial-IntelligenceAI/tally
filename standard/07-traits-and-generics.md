@@ -306,7 +306,7 @@ whose parts are `Eq`, and by `@derive(Eq)` for structs and enums. It cannot
 be implemented by a hand-written impl. Within generic code, `==` and `!=` are
 available on `T` exactly when `T: Eq`. `Hash`, `Ord`, `Default`, `Debug` and
 `Display` are ordinary traits in `core` (chapter 19) and may be derived where
-16.4.3 says.
+16.3.3 says.
 
 ```tally
 fn contains[T: Eq](xs: &[]T, x: &T) -> bool {

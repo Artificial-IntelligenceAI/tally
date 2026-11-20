@@ -60,7 +60,7 @@ foreign code or a truthless `unsafe impl`).
    convention; calling a foreign function in a way its C declaration does not
    allow; foreign code performing undefined behaviour.
 7. Foreign code unwinding into, or `longjmp`-ing over, Tally frames.
-8. Executing `core.hint.unreachable_unchecked()` (19.16.3).
+8. Executing `core.hint.unreachable_unchecked()` (19.18.3).
 9. Breaking the promise of `@drop_ignores` (9.6.2) or of an `unsafe impl` of
    `Send` or `Sync` (15.2), or calling code outside the program's call graph
    through a Tally function pointer (11.6.4).

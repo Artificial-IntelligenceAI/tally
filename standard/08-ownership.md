@@ -218,7 +218,7 @@ fn f(a: Noisy, b: Noisy) {
 it) is safe; `mem.forget(v)` moves `v` and does not drop it, and a value kept
 alive by a reference-counting cycle is never dropped. Statics are never
 dropped. When the program panics or exits through `process.exit`, no drops run
-(12.4.1, 20.5.3).
+(12.4.1, 20.5.1).
 
 ```tally
 let f = File.open("log")?;

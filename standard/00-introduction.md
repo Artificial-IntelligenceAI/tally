@@ -62,7 +62,7 @@ places no requirement on what happens; it can arise only from code inside
 written in code font.
 
 ```tally
-// Unspecified: the iteration order of a HashMap (19.12.4).
+// Unspecified: the iteration order of a HashMap (19.14.5).
 // Implementation-defined: the value of mem.size_of[usize]() on a target.
 // Undefined behaviour: dereferencing a dangling raw pointer in unsafe code.
 ```

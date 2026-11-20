@@ -141,7 +141,7 @@ fiber.run(|fs| {
 
 **15.4.1** The language's support for fibers consists of: execution contexts
 (15.1.1); exact stack bounds (11.5); the unsafe primitive context switch
-`core.context.switch` (19.15.3); and the rule that every waiting primitive is
+`core.context.switch` (19.16.2); and the rule that every waiting primitive is
 *fiber-aware* (15.4.2). Schedulers are library code (20.8).
 
 ```tally
@@ -151,7 +151,7 @@ fiber.run(|fs| {
 
 **15.4.2** Each execution context has a *waiter*: a pointer, kept in the
 context's control block, to an object implementing `core.context.Waiter`
-(19.15.4), or none. A waiting primitive (20.1.3) that would block first checks
+(19.16.2), or none. A waiting primitive (20.1.3) that would block first checks
 the current context's waiter. If there is none (the context is a thread), it
 blocks the thread through the operating system. If there is one (the context is
 a fiber), it hands the waiter what it is waiting for and suspends the fiber

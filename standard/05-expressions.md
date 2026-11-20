@@ -679,7 +679,7 @@ let found = scan: {
 `a..b` is `Range[T]`, `a..=b` is `RangeInclusive[T]`, `a..` is
 `RangeFrom[T]`, `..b` is `RangeTo[T]`, `..=b` is `RangeToInclusive[T]`, and
 `..` is `RangeFull`. Both operands must have the same type `T`. Ranges of
-integer types and `char` are iterators (19.10.4). A range is empty when its
+integer types and `char` are iterators (19.8.2). A range is empty when its
 start is not less than (for `..=`: greater than) its end; building such a
 range never panics.
 

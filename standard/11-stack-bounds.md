@@ -184,7 +184,7 @@ fn on_packet(p: &Packet) may none { route(p); }
 ```
 *From: D3, D33.*
 
-**11.5.2** The library function `core.stack.bound(f) -> ?usize` (19.15.1)
+**11.5.2** The library function `core.stack.bound(f) -> ?usize` (19.16.1)
 returns the bound of calling `f`, where `f` is a function item, a closure, or a
 function pointer (for which the bound is that of an indirect call through its
 type), plus the runtime overhead constant `core.stack.CALL_OVERHEAD`, or
@@ -216,7 +216,7 @@ pub fn spawn[F: FnOnce() may block | sys | panic | alloc](s: &Scope, f: F) -> Fi
 
 **11.6.1** The runtime creates every execution context it provides (the main
 thread is created by the operating system) with a stack of at least the bound
-of its entry function plus `CONTEXT_OVERHEAD` (19.15.2), when that bound is
+of its entry function plus `CONTEXT_OVERHEAD` (19.16.1), when that bound is
 known and the creating API asks for exact sizing (20.7.1, 20.8.2). Code
 running in such a context cannot overflow its stack.
 

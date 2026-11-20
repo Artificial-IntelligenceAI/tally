@@ -9,7 +9,7 @@ index out of range, an overflow, a broken invariant); it stops the program.
 
 **12.1.1** Any type may be used as the error type `E` of `T ! E`. By
 convention, error types are enums or structs that implement `Display` and
-`Debug`, and `core.error.Error` (19.3.1). Error values are ordinary values:
+`Debug`, and `core.error.Error` (19.3.3). Error values are ordinary values:
 they are moved, matched and dropped like any other.
 
 ```tally
@@ -102,7 +102,7 @@ panic handler is a function of type `fn(&PanicInfo) -> never may sys | block`;
 it must not return. While it runs, no destructors run, no deferred expressions
 run, and other threads are not stopped; if a second panic occurs on any thread
 while a panic handler is running, the program aborts immediately
-(`core.process.abort`, 19.16.1) without calling the handler again. The panic
+(`core.process.abort`, 19.18.2) without calling the handler again. The panic
 handler of `std` (used unless the program defines one) writes
 `panic: <message>` and ` at <file>:<line>:<column>` to the standard error
 stream, without allocating and without flushing any buffered output of the
