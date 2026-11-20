@@ -152,6 +152,7 @@ repeatable), or an argument of the wrong form is an error.
 | `@doc("...")` | item, field, variant, member, module (via `//!`) | documentation (1.2.3) |
 | `@drop_ignores(T)` | `unsafe impl` of `Drop` | 9.6.2 |
 | `@entry` | function | freestanding entry point (17.3.1) |
+| `@expect_panic` / `@expect_panic("text")` | test | 21.3.4 |
 | `@export` / `@export("sym")` | public foreign-ABI function | 14.3.1 |
 | `@global_allocator` | static | the program's global allocator (19.13.5) |
 | `@inline(always)`, `@inline(never)`, `@inline` | function | inlining request; `always` and `never` must be obeyed |

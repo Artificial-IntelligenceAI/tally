@@ -18,7 +18,7 @@ fn main() ! AppError may sys | block | alloc | panic {
 **17.1.2** On hosted targets (operating system other than `none`), before
 `main` runs, the runtime of `std` performs, in this order: setting up the main
 thread's execution-context control block (including context-local statics,
-15.5.2) and its signal stack (20.10.2); setting the disposition of `SIGPIPE`
+15.5.2) and its signal stack (20.9.2); setting the disposition of `SIGPIPE`
 to "ignore" on Unix targets, so that writing to a closed pipe returns an error
 instead of killing the process; recording the command-line arguments and
 environment; seeding the process-wide hash key from the operating system's

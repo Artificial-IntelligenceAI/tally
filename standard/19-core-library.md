@@ -832,7 +832,7 @@ pub unsafe trait GlobalAlloc {
 
 `Use` must be within `sys | block | panic`. A program has at most one
 `@global_allocator`. If none is defined, `std` provides `std.alloc.System`
-(20.11.1); a program that does not link `std` and contains any function with
+(20.10.1); a program that does not link `std` and contains any function with
 the `alloc` effect must define one, or linking fails. Calls to the global
 allocator's methods are the primitive sources of `alloc` (10.7.1).
 

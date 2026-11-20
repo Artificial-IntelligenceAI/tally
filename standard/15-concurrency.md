@@ -4,8 +4,8 @@
 
 **15.1.1** An *execution context* is a stack together with the sequence of
 function activations running on it. The execution contexts are: the main
-thread; each thread created by `std.thread` (20.8); each fiber created by
-`std.fiber` (20.9); and, on freestanding targets, each interrupt context
+thread; each thread created by `std.thread` (20.7); each fiber created by
+`std.fiber` (20.8); and, on freestanding targets, each interrupt context
 (17.4). Every activation runs in exactly one execution context, and recursion
 limits (11.4.1) and context-local statics (15.5.2) are per execution context.
 
@@ -142,7 +142,7 @@ fiber.run(|fs| {
 **15.4.1** The language's support for fibers consists of: execution contexts
 (15.1.1); exact stack bounds (11.5); the unsafe primitive context switch
 `core.context.switch` (19.15.3); and the rule that every waiting primitive is
-*fiber-aware* (15.4.2). Schedulers are library code (20.9).
+*fiber-aware* (15.4.2). Schedulers are library code (20.8).
 
 ```tally
 // the scheduler in std.fiber is ordinary Tally code built on core.context

@@ -204,7 +204,7 @@ as a generic parameter (for example `fiber.spawn[F: FnOnce()]`), the bound is
 that of the instance `F.call_once` in the program being linked.
 
 ```tally
-// in std.fiber (20.9.2):
+// in std.fiber (20.8.2):
 pub fn spawn[F: FnOnce() may block | sys | panic | alloc](s: &Scope, f: F) -> Fiber ! SpawnError may alloc {
     let size = stack.bound_required(&f);    // bound of F.call_once in this program
     ...
@@ -217,7 +217,7 @@ pub fn spawn[F: FnOnce() may block | sys | panic | alloc](s: &Scope, f: F) -> Fi
 **11.6.1** The runtime creates every execution context it provides (the main
 thread is created by the operating system) with a stack of at least the bound
 of its entry function plus `CONTEXT_OVERHEAD` (19.15.2), when that bound is
-known and the creating API asks for exact sizing (20.8.1, 20.9.2). Code
+known and the creating API asks for exact sizing (20.7.1, 20.8.2). Code
 running in such a context cannot overflow its stack.
 
 ```tally
@@ -238,7 +238,7 @@ fn deep(n: u64) -> u64 may panic { if n == 0 { 0 } else { 1 + deep(n - 1) } }
 *From: D33, D2.*
 
 **11.6.3** Asynchronous signal handlers installed through `std` run on a
-separate per-thread signal stack (20.10.2), so they do not consume the
+separate per-thread signal stack (20.9.2), so they do not consume the
 interrupted context's stack. On targets where interrupt handlers run on the
 interrupted stack (17.4), the program must reserve space for them; the bound
 of each handler is available through `core.stack.bound` for that purpose.
