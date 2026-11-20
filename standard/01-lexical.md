@@ -16,7 +16,7 @@ EF BB BF 66 6E ...   (BOM, then "fn ...")   -> accepted, BOM ignored
 
 **1.1.2** A line ends at U+000A (LF) or at the pair U+000D U+000A (CR LF).
 A U+000D not immediately followed by U+000A is an error. Line numbers used in
-diagnostics, `@cfg` and `core.source.line()` (19.17.1) count line ends,
+diagnostics, `@cfg` and `core.source.location()` (19.18.4) count line ends,
 starting from 1.
 
 ```text
@@ -119,7 +119,7 @@ identifiers except in the grammar positions listed, where the grammar
 
 | Word | Is a keyword when it appears |
 |---|---|
-| `any`, `none` | as an effect term (10.2.3) |
+| `any`, `none`, `alloc`, `block`, `panic`, `sys` | as an effect term (10.2.3) |
 | `effect` | at the start of an item or trait/impl member, or in a generic parameter list, followed by an identifier |
 | `from` | after a function's return type, or before an enum variant name |
 | `may` | where an effect clause may begin (2.4.2) |
@@ -244,7 +244,7 @@ second";                        // error: line end in string literal
 
 **1.4.6** A *C string literal* is `c` immediately followed by a string
 literal (or `cr` followed by a raw string literal). It denotes the literal's
-bytes followed by one zero byte, has type `&CStr` (14.2.2), and must not
+bytes followed by one zero byte, has type `CStr` (14.2.2), and must not
 contain a zero byte. Its token class is `CSTRING_LIT`.
 
 ```tally

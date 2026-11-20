@@ -165,6 +165,7 @@ repeatable), or an argument of the wrong form is an error.
 | `@stack_bound(N)` | foreign function | 14.1.5 |
 | `@stack_limit(N)` | function | 11.5.1 |
 | `@thread_local` | static | 15.5.1 |
+| `@track_caller` | function | panics and `source.location()` inside it report its caller's location (19.18.4) |
 | `@used` | static | keep the symbol even if unreferenced |
 
 ```tally
@@ -191,8 +192,8 @@ same trait for every type parameter. The generated behaviour is:
 * `Copy`: values are copied bitwise; all fields must be `Copy`; deriving
   `Copy` also derives `Clone` (by copying) whether or not `Clone` is listed.
 * `Clone`: clones each field in declaration order (for enums, the active
-  variant's fields); the `Clone` effect is the union of the fields' `Clone`
-  effects.
+  variant's fields), returning the first error if one fails; the `Clone`
+  effect is the union of the fields' `Clone` effects.
 * `Eq`: makes the type comparable (5.5.1).
 * `Ord` (requires `Eq`): compares field by field in declaration order, the
   first unequal field deciding; for enums, compares tag values first (in

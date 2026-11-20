@@ -24,8 +24,10 @@ fn on_irq() may none {
 
 ## 10.2 Effects and effect sets
 
-**10.2.1** The built-in effects are declared in `core.effects` and are in the
-prelude:
+**10.2.1** There are four built-in effects. They are not items: their names
+`alloc`, `block`, `panic` and `sys` are recognised only as effect terms
+(1.3.3), cannot be shadowed there, and do not conflict with items of the same
+name (such as the prelude function `panic`, 19.18.1).
 
 | Effect | A function with it may... |
 |---|---|

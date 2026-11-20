@@ -88,11 +88,11 @@ extern "C" {
 *From: D38, D37.*
 
 **14.2.2** A C string literal `c"..."` (a string literal prefixed with `c`)
-has type `&CStr` (19.14.2): the bytes of the literal followed by a zero byte.
-It must not contain `\0` or `\x00`.
+has type `CStr` (19.17.2), a copyable view of static bytes: the bytes of the
+literal followed by a zero byte. It must not contain `\0` or `\x00`.
 
 ```tally
-let s: &CStr = c"hello";
+let s: CStr = c"hello";
 unsafe { puts(s.as_ptr()); }
 ```
 *From: D38, D57.*

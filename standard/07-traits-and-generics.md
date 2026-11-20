@@ -25,7 +25,7 @@ pub trait Shape {
 
 ```tally
 pub trait Default { fn default() -> Self; }        // associated function
-pub trait Clone { fn clone(&self) -> Self may Self.Clone; effect Clone = none; }
+pub trait Clone { effect Clone = none; fn clone(&self) -> Self ! AllocError may Self.Clone; }
 ```
 *From: D27.*
 
@@ -75,7 +75,7 @@ generic definition, independent of how it is instantiated.
 
 ```tally
 fn dup[T](x: T) -> (T, T) { (x, x) }               // error: T is not Copy
-fn dup2[T: Clone](x: T) -> (T, T) may T { (x.clone(), x) }
+fn dup2[T: Clone](x: T) -> (T, T) ! AllocError may T { (x.clone()?, x) }
 ```
 *From: D27, D2.*
 
@@ -163,7 +163,7 @@ parameters that satisfies its bounds.
 ```tally
 impl[T: Clone] Clone for Pair[T] {
     effect Clone = T;
-    fn clone(&self) -> Self may T { Pair(self.0.clone(), self.1.clone()) }
+    fn clone(&self) -> Self ! AllocError may T { Pair(self.0.clone()?, self.1.clone()?) }
 }
 impl[T, U] Marker for Wrap[T] {}      // error: U is not constrained
 ```
@@ -245,10 +245,12 @@ let e = c;             // still fine
 ```
 *From: D23.*
 
-**7.6.2** `Clone` declares `fn clone(&self) -> Self may Self.Clone` with
-associated effect `Clone` (default `none`). Every `Copy` type implements
-`Clone` by copying. `@derive(Clone)` generates an impl that clones each field,
-with `Clone` effect equal to the union of the fields' clone effects.
+**7.6.2** `Clone` declares `fn clone(&self) -> Self ! AllocError may
+Self.Clone` with associated effect `Clone` (default `none`). Cloning returns a
+result because cloning a value that owns memory allocates, and allocation can
+fail (D22). Every `Copy` type implements `Clone` by copying, never failing.
+`@derive(Clone)` generates an impl that clones each field with `?`, with
+`Clone` effect equal to the union of the fields' clone effects.
 
 ```tally
 @derive(Clone) struct Doc { title: String, pages: Vec[Page] }
