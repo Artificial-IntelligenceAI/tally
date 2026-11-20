@@ -16,7 +16,7 @@ let a = p.x;                // place p.x read; f64 is Copy, so copied
 let s = String.from("hi")?;
 let t = s;                  // place s moved into t
 ```
-*From: D22.*
+*From: D23.*
 
 **5.1.2** The operands of an expression are evaluated left to right, each
 exactly once, before the operation itself. This applies to binary operators
@@ -135,8 +135,10 @@ operand values, as determined by these rules only:
 the wrapping and saturating operators, `&`, `|`, `^`, `~`, `!`, and float
 arithmetic never panic; `/` and `%` by a constant operand that is neither 0
 nor -1 never panic; `<<` and `>>` by a constant amount within range never
-panic; `as` between types where every source value is representable (4.11.2)
-never panics. No other reasoning (about ranges of variables, or what an
+panic; `as%`, and every `as` that 5.4.2–5.4.5 define as unable to panic
+(between types where every source value is representable (4.11.2), integer
+to float, `f32` to `f64` and back, `bool` to an integer, `u8` to `char`),
+never panic. No other reasoning (about ranges of variables, or what an
 optimiser could prove) is used.
 
 ```tally
@@ -223,8 +225,11 @@ let none = Op.from_tag(0);       // .None
 `()` or `never`; a raw pointer or function pointer (compared by address); a
 reference `&T` or `&mut T` to a comparable `T` (compared by the referenced
 values); an array or slice of a comparable type, or `str`; a tuple of
-comparable types; or a struct or enum declared with `@derive(Eq)` (16.3.3)
-whose field types are all comparable for the given generic arguments. Unions,
+comparable types; `Box[T, A]`, `Rc[T, A]` and `Arc[T, A]` of a comparable
+`T` (compared by the values they point to); `Vec[T, A]` of a comparable `T`
+and `String[A]` (compared as their slices); or a struct or enum declared with
+`@derive(Eq)` (16.3.3) whose field types are all comparable for the given
+generic arguments. Unions,
 closures, function items and `dyn` types are never comparable. `Option[T]` and
 `Result[T, E]` are declared with `@derive(Eq)`.
 
@@ -242,7 +247,9 @@ let h = Handle(1) == Handle(1);       // error: Handle does not derive Eq
 yield `bool`. Equality is structural: arrays and slices are equal if they have
 the same length and equal elements in order; `str` values if they have the
 same bytes; tuples and structs if all fields are equal; enums if they have the
-same variant and equal fields. Floats compare by IEEE 754 rules (NaN is not
+same variant and equal fields. The right operand is checked with the left
+operand's type as its expected type (so `x.cmp(&y) == .Less` works). Floats
+compare by IEEE 754 rules (NaN is not
 equal to itself; `-0.0 == 0.0`). Comparison stops at the first unequal part.
 `==` never has effects.
 
@@ -255,9 +262,9 @@ let z = -0.0 == 0.0;   // true
 *From: D17, D2.*
 
 **5.5.3** `<`, `<=`, `>`, `>=` require two operands of the same integer,
-float, `char` or `bool` type, or the same raw pointer type, and yield `bool`.
-Integers and `char` compare by value, `bool` with `false < true`, floats by
-IEEE 754 (every comparison involving NaN is false), raw pointers by address.
+float, `char` or `bool` type, and yield `bool`. Integers and `char` compare
+by value, `bool` with `false < true`, floats by IEEE 754 (every comparison
+involving NaN is false). Raw pointers are compared with `p.addr() < q.addr()`.
 Ordering other types uses methods of the `Ord` trait (19.9.2).
 
 ```tally
@@ -384,8 +391,9 @@ let p = Point3(1.0, 2.0, 3.0);     // tuple-struct constructor
 
 **5.7.2** Each argument is evaluated and then moved or copied into its
 parameter. Parameters are local bindings of the callee; a parameter declared
-`var` is mutable. Calling an `unsafe fn` is an unsafe operation. Calling an
-`extern` function is an unsafe operation.
+`var` is mutable. Calling an `unsafe fn` is an unsafe operation. Calling a
+function declared in an `extern` block is an unsafe operation (a Tally
+function defined with `extern "C" fn` is called like any other).
 
 ```tally
 fn bump(var n: u32) -> u32 may panic { n += 1; n }
@@ -393,7 +401,7 @@ let s = String.from("a")?;
 consume(s);           // s moved into the parameter
 let t = s;            // error: use of moved value (8.2.2)
 ```
-*From: D22, D36.*
+*From: D23, D36.*
 
 **5.7.3** Tally has no named arguments, default argument values or function
 overloading. Within one scope a name refers to one function.
@@ -426,7 +434,7 @@ implementations (7.9.2). An existing tuple cannot be passed as the rest; it is
 passed as a single element.
 
 ```tally
-pub fn println[A: Display](..args: A) may sys | block { ... }
+pub fn println[A: Display](..args: A) may sys | block | panic | A { ... }
 println("x = ", x, ", y = ", y);   // A = (&str, i64, &str, i64)
 println();                          // A = ()
 ```
@@ -459,7 +467,7 @@ reference mentions a reference (4.10.2) and is subject to borrow checking
 ```tally
 var count = 0;
 let name = String.from("x")?;
-let inc = || count += 1;          // captures count by &mut
+let inc = || { count += 1; };     // captures count by &mut
 let show = || print(&name);       // captures name by &
 let take = move || consume(name); // captures name by value
 ```
@@ -534,7 +542,9 @@ let .Some(v) = map.get(&k) else { return .None; };
 `unsafe`), or `*p` for a raw `*mut T` (inside `unsafe`). If the place holds a
 value, that value is dropped after `v` is evaluated and before the new value
 is stored. `p op= v;` evaluates `v`, then evaluates the place `p` once, then
-stores `p op v` with the same checks as the operator. Assignment is a
+stores `p op v` with the same checks as the operator; the right side of a
+compound assignment is not a coercion site, so both sides must have the same
+type. Assignment is a
 statement, not an expression.
 
 ```tally
@@ -629,12 +639,15 @@ while i < 10 { i += 1; }
 ```
 *From: D10.*
 
-**5.10.6** `for p in e { B }` evaluates `e`, converts it to an iterator with
-`IntoIterator.into_iter` (19.10.1), and then behaves as:
+**5.10.6** `for p in e { B }` evaluates `e`. If the type of `e` implements
+`Iterator`, it is used as the iterator; otherwise it must implement
+`IntoIterator` (19.10.1) and is converted with `into_iter`. The loop then
+behaves as follows, where temporaries created while evaluating `e` live until
+the loop ends:
 
 ```tally
 {
-    var __it = IntoIterator.into_iter(e);
+    var __it = IntoIterator.into_iter(e);    // or just `e`, if it is an Iterator
     loop {
         match __it.next() {
             .Some(p) => { B }
@@ -694,8 +707,11 @@ let r = 5..2;                     // empty, no panic
 
 **5.12.1** A struct literal `S { f1: e1, ..., fn: en }` builds a value of
 struct `S` (or of a struct-like variant). Every field must be given exactly
-once, unless `..base` is present; then the fields not given are moved or
-copied out of `base`, which must have type `S`. A field initialiser `f` alone
+once, unless `..base` is present. `base` must have type `S`, is evaluated
+after the given fields, and is used by value as a whole: the new value takes
+the fields not given from it, and the fields of `base` that were given
+explicitly are dropped at the end of the full expression. `S` must not have a
+`Drop` impl when `..base` is used. A union literal gives exactly one field. A field initialiser `f` alone
 means `f: f`. Fields not visible at the literal's location cannot be given,
 so a struct with a field not visible here can be built here only through
 functions.
@@ -706,7 +722,7 @@ let x = 3.0;
 let q = Point { x, ..p };        // y copied from p
 let c = Conn { id: 1, fd: 3 };   // error outside the package: `fd` is not visible
 ```
-*From: D18, D22.*
+*From: D18, D23.*
 
 **5.12.2** An array literal `[e1, ..., en]` builds a `[n]T` where every
 element has type `T`. `[e; N]` evaluates `e` once and builds a `[N]T` of N
@@ -719,7 +735,7 @@ let a = [1, 2, 3];
 let z: [256]u8 = [0; 256];
 let s = [String.new(); 2];     // error: String is not Copy
 ```
-*From: D22.*
+*From: D23.*
 
 ## 5.13 `orelse`
 
@@ -748,7 +764,7 @@ checked by the borrow checker (chapter 9). Borrowing never has effects.
 var v = [1, 2, 3];
 let r = &v[0];
 let m = &mut v[1];        // error while r is still used (9.3.2)
-let t = &compute();       // reference to a temporary (8.4.2)
+let n = (&compute()).len();   // reference to a temporary, used within the statement (8.4.2)
 ```
 *From: D24.*
 

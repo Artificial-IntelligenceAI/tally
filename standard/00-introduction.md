@@ -21,7 +21,7 @@ toolchain (chapter 21); and the questions still open (chapter 22).
 // A complete Tally program.
 import std.io;
 
-pub fn main() may sys | block {
+pub fn main() may sys | block | panic {
     io.println("hello, world");
 }
 ```
@@ -63,7 +63,7 @@ written in code font.
 
 ```tally
 // Unspecified: the iteration order of a HashMap (19.14.5).
-// Implementation-defined: the value of mem.size_of[usize]() on a target.
+// Implementation-defined: the value of mem.size_of.[usize]() on a target.
 // Undefined behaviour: dereferencing a dangling raw pointer in unsafe code.
 ```
 *From: D2, D6.*
@@ -97,6 +97,8 @@ EBNF:
 | `{ a }` | zero or more `a` |
 | `( a )` | grouping |
 | `a % ","` | one or more `a` separated by `","`, with an optional trailing `","` |
+| `[c1-c2]` | (chapter 1 only) one character in the range c1 to c2 |
+| `(* text *)` | a comment in a grammar rule |
 
 ```text
 ParamList = Param % "," ;        (* accepts:  a: u8   and   a: u8, b: u8, *)

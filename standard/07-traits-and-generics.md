@@ -86,7 +86,7 @@ one bound declares it, the reference is an error and must be written in a
 `where`-bound form `T: Iterator[Item = U]` with a fresh parameter `U`.
 
 ```tally
-fn print_all[I: Iterator](it: I) may I | sys | block where I.Item: Display {
+fn print_all[I: Iterator](it: I) may I | I.Item | sys | block | panic where I.Item: Display {
     for x in it { io.println(x); }
 }
 ```
@@ -222,7 +222,7 @@ type.
 ```tally
 pub trait Greet {
     fn name(&self) -> &str;
-    fn hello(&self) may sys | block { io.println("hello, ", self.name()); }
+    fn hello(&self) may sys | block | panic { io.println("hello, ", self.name()); }
 }
 ```
 *From: D27.*

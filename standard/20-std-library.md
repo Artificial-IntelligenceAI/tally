@@ -8,10 +8,13 @@ primitive (20.1.3) has `block`.
 
 ## 20.1 Organisation
 
-**20.1.1** For every module `core.m`, `std.m` is the same module (a
-re-export). In addition `std` has the modules `std.io`, `std.fs`, `std.net`,
-`std.process`, `std.time` (extending `core.time`), `std.thread`, `std.fiber`,
-`std.sync`, `std.signal`, `std.alloc` (extending `core.alloc`) and `std.os`.
+**20.1.1** For every module `core.m`, `std` has a module `std.m` that
+re-exports every item of `core.m`. Three of them add items: `std.time`
+(20.6.1), `std.alloc` (20.10.1) and `std.process` (20.5.1; `std.process.abort`
+is `core.process.abort`). In addition `std` has the modules `std.io`, `std.fs`,
+`std.net`, `std.thread`, `std.fiber`, `std.sync`, `std.signal` and `std.os`.
+Like `core`, the root module `std` re-exports nothing; import the module you
+need (`import std.fs;`).
 
 ```tally
 import std.collections.HashMap;     // the same item as core.collections.HashMap
@@ -99,8 +102,10 @@ pub trait Write {
 
 `read_to_end` and `read_to_string` report allocation failure as an `Error`
 with kind `OutOfMemory`. `Vec[u8, A]` implements `Write` (effect `A`); `&[]u8`
-implements `Read` (effect `none`). Every `Write` type with `Io` within
-`E` can be used as a `fmt.Sink` through `io.sink(&mut w)`.
+implements `Read` (effect `none`). `pub fn sink[W: Write](w: &mut W) ->
+SinkAdapter[W] from w` wraps a writer as a `fmt.Sink` whose `Write` effect is
+`W.Io`; a write error is reported to the formatter as `FmtError` and kept in
+the adapter, where `SinkAdapter.error(&self) -> ?Error` returns it.
 
 ```tally
 var data: Vec[u8] = Vec.new();
@@ -109,12 +114,14 @@ _ = file.read_to_end(&mut data)?;
 *From: D30, D22.*
 
 **20.2.3** `BufReader[R: Read]` and `BufWriter[W: Write]` add an 8192-byte
-buffer: `BufReader.new(r) -> BufReader[R] ! AllocError may alloc`,
-`read_line[A](&mut self, s: &mut String[A]) -> usize ! Error` (appends up to
-and including the next `\n`; 0 at end of input), `lines(self) -> Lines[R]`
-(an iterator of `String ! Error`, line ends removed); `BufWriter.new(w)`,
-which flushes on `flush` and when dropped (ignoring errors; its drop effect
-is `W.Io`).
+buffer: `BufReader.new(r) -> BufReader[R] ! AllocError may alloc | R` (drops
+`r` on failure); `read_line[A](&mut self, s: &mut String[A]) -> usize ! Error
+may R.Io | A` (appends up to and including the next `\n`; 0 at end of input;
+`InvalidData` if the line is not UTF-8); `lines(self) -> Lines[R]` (an
+iterator of `String ! Error` with `Next = R.Io | alloc`, line ends removed);
+`BufWriter.new(w) -> BufWriter[W] ! AllocError may alloc | W`, which flushes
+on `flush` and when dropped (ignoring errors; its drop effect is `W | alloc`).
+Both implement `Read`/`Write` with the inner type's `Io` plus `alloc`.
 
 ```tally
 var r = io.BufReader.new(fs.File.open(path)?)?;
@@ -136,7 +143,7 @@ out.write_all(b"ready\n")?;
 ```
 *From: D46.*
 
-**20.2.5** `print[X: Display](..args: X) may sys | block | panic` writes the
+**20.2.5** `print[X: Display](..args: X) may sys | block | panic | X` writes the
 arguments' `Display` output to standard output; `println` also writes `\n`;
 `eprint` and `eprintln` write to standard error. They ignore write errors
 (including a closed pipe). To detect errors, write to `stdout()` directly.
@@ -165,7 +172,7 @@ impl io.Read for File { effect Io = sys | block; ... }
 impl io.Write for File { effect Io = sys | block; ... }
 @derive(Copy, Default) pub struct OpenOptions { pub read: bool, pub write: bool, pub append: bool,
                                                pub create: bool, pub create_new: bool, pub truncate: bool,
-                                               pub mode: u32 }      // mode: Unix permission bits, default 0o666
+                                               pub mode: u32 }      // Unix permission bits; 0 (the default) means 0o666
 pub enum SeekFrom { Start(u64), End(i64), Current(i64) }
 pub struct Metadata { ... }
 impl Metadata { pub fn len(&self) -> u64; pub fn is_file(&self) -> bool; pub fn is_dir(&self) -> bool;
@@ -198,8 +205,9 @@ for e in fs.read_dir("logs")? { let e = e?; if e.name().ends_with(".log") { ... 
 ```tally
 @derive(Copy, Eq, Ord, Hash, Debug) pub enum IpAddr { V4([4]u8), V6([16]u8) }
 @derive(Copy, Eq, Ord, Hash, Debug) pub struct SocketAddr { pub ip: IpAddr, pub port: u16 }
-impl FromStr for IpAddr { ... }        // "127.0.0.1", "::1"
-impl FromStr for SocketAddr { ... }    // "127.0.0.1:80", "[::1]:80"
+impl FromStr for IpAddr { type Err = AddrParseError; ... }        // "127.0.0.1", "::1" (RFC 4291 text forms)
+impl FromStr for SocketAddr { type Err = AddrParseError; ... }    // "127.0.0.1:80", "[::1]:80"
+@derive(Copy, Eq, Debug) pub struct AddrParseError;                // implements Display and Error
 pub fn resolve(host: &str, port: u16) -> Vec[SocketAddr] ! io.Error may sys | block | alloc;   // waiting
 pub struct TcpListener { ... }
 impl TcpListener {
@@ -242,7 +250,7 @@ loop { let (c, peer) = l.accept()?; handle(c, peer); }
 pub fn args() -> Args may sys;          // Iterator[Item = &str] (region static); invalid UTF-8 replaced by U+FFFD
 pub fn env(name: &str) -> ?String ! AllocError may sys | alloc;
 pub unsafe fn set_env(name: &str, value: &str) ! io.Error may sys | alloc;   // unsafe: races with other threads reading the environment
-pub fn exit(code: u8) -> never may sys;  // 17.1.4
+pub fn exit(code: u8) -> never may sys | block;  // 17.1.4 (flushing stdout may wait)
 pub fn id() -> u32 may sys;
 pub struct Command { ... }
 impl Command {
@@ -304,14 +312,14 @@ io.println("took ", t0.elapsed().as_millis(), " ms");
 
 ```tally
 pub fn spawn[T: Send + Static, F: FnOnce() -> T + Send + Static](f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F;
-pub fn run_all[T: Send, F: FnOnce() -> T + Send, I: IntoIterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
+pub fn run_all[T: Send, F: FnOnce() -> T + Send, I: Iterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
 pub fn scope[E: Sync, R, F: FnOnce(&Scope[E]) -> R](env: &E, f: F) -> R may F | block | sys;
 pub view struct Scope[E] { ... }                     // Sync; its own region is that of `env`
 impl[E] Scope[E] {
     pub fn env(&self) -> &E from *self;
     pub fn spawn[T: Send + Static, G: FnOnce(&Scope[E]) -> T + Send + Static](&self, g: G) -> ScopedJoinHandle[T] ! SpawnError from self may alloc | sys | G;
 }
-pub struct Builder { pub name: ?&str, pub stack_size: ?usize }
+pub view struct Builder { pub name: ?&str, pub stack_size: ?usize }   // name: copied when spawning
 impl Builder { pub fn spawn[T: Send + Static, F: FnOnce() -> T + Send + Static](self, f: F) -> JoinHandle[T] ! SpawnError may alloc | sys | F; }
 impl[T] JoinHandle[T] { pub fn join(self) -> T may sys | block; }            // waiting
 impl[T] ScopedJoinHandle[T] { pub fn join(self) -> T may sys | block; }
@@ -332,14 +340,16 @@ by `fs`, waits for all of them, and returns their results in order; the
 callables may borrow anything, because they cannot outlive the call.
 `scope` runs `f` on the current thread with a `Scope` through which more
 threads can be started at any time; it returns after all of them have
-finished. Such threads reach borrowed data only through `env`, which lives
-for the whole call (9.5.7 explains why their closures must otherwise be
+finished. If starting a thread fails, `run_all` and `scope` first wait for
+every thread already started and then return or propagate the error. Such
+threads reach borrowed data only through `env`, which lives for the whole
+call (9.5.7 explains why their closures must otherwise be
 `Static`). Dropping a `JoinHandle` detaches the thread. Because panics end the
 process, `join` has no error case.
 
 ```tally
 var results: [4]u64 = [0; 4];
-let jobs = results.iter_mut().enumerate().map(|(i, r)| move || *r = crunch(i));
+let jobs = results.iter_mut().enumerate().map(|(i, r)| move || { *r = crunch(i); });
 _ = thread.run_all(jobs)?;                       // each thread writes its own element
 
 let table = load_table()?;
@@ -355,7 +365,7 @@ thread.scope(&table, |s| {
 
 ```tally
 pub fn run[E, R, F: FnOnce(&Scope[E]) -> R](env: &E, f: F) -> R ! SpawnError may F | alloc | sys | block;
-pub fn run_all[T, F: FnOnce() -> T, I: IntoIterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
+pub fn run_all[T, F: FnOnce() -> T, I: Iterator[Item = F]](fs: I) -> Vec[T] ! SpawnError may I | F | alloc | sys | block;
 pub view struct Scope[E] { ... }                     // its own region is that of `env`
 impl[E] Scope[E] {
     pub fn env(&self) -> &E from *self;
@@ -374,7 +384,8 @@ can reach `env` (which lives for the whole call) and spawn more fibers; their
 closures must otherwise be `Static`, for the reason given in 9.5.7.
 `fiber.run_all` runs one fiber per callable on a new scheduler on the current
 thread and returns their results in order; those callables may borrow
-anything.
+anything. As for threads, if starting a fiber fails, `run` and `run_all` wait
+for every fiber already started before returning the error.
 
 ```tally
 fn serve_all(addr: SocketAddr, cfg: &Config) ! AppError may sys | block | alloc | panic {
@@ -429,7 +440,13 @@ impl[T] Mutex[T] {
     pub fn get_mut(&mut self) -> &mut T from self;
     pub fn into_inner(self) -> T;
 }
-pub struct RwLock[T] { ... }                            // read() -> ReadGuard, write() -> WriteGuard; waiting
+pub struct RwLock[T] { ... }                            // Send + Sync if T: Send + Sync
+impl[T] RwLock[T] {
+    pub fn new(v: T) -> Self;
+    pub fn read(&self) -> ReadGuard[T] from self may sys | block;     // waiting; many readers
+    pub fn write(&self) -> WriteGuard[T] from self may sys | block;   // waiting; one writer
+    pub fn into_inner(self) -> T;
+}
 pub struct Condvar { ... }
 impl Condvar {
     pub fn new() -> Self;
@@ -437,8 +454,15 @@ impl Condvar {
     pub fn wait_timeout[T](&self, g: MutexGuard[T], d: Duration) -> (MutexGuard[T], bool) may sys | block;
     pub fn notify_one(&self) may sys; pub fn notify_all(&self) may sys;
 }
-pub struct OnceLock[T] { ... }                          // like OnceCell, Sync
-pub struct Barrier { ... }                              // new(n), wait(): waiting
+pub struct OnceLock[T] { ... }                          // Sync if T: Send + Sync
+impl[T] OnceLock[T] {
+    pub fn new() -> Self;
+    pub fn get(&self) -> ?&T from self;
+    pub fn set(&self, v: T) -> () ! T may sys | block;
+    pub fn get_or_init[F: FnOnce() -> T](&self, f: F) -> &T from self may F | sys | block;   // waiting while another context initialises
+}
+pub struct Barrier { ... }
+impl Barrier { pub fn new(n: usize) -> Self may panic; pub fn wait(&self) -> bool may sys | block; }   // panics if n == 0; true for one leader
 pub fn channel[T: Send](capacity: usize) -> (Sender[T], Receiver[T]) ! AllocError may alloc | panic;  // panics if capacity is 0
 impl[T] Sender[T] {
     pub fn send(&self, v: T) ! SendError[T] may sys | block;      // waits while full; error returns v if all receivers are gone
@@ -469,9 +493,11 @@ pub fn wait(set: &[]Signal) -> Signal ! io.Error may sys | block;   // waiting; 
 ```
 
 A handler set with `set_handler` runs asynchronously on the interrupted
-thread's signal stack (a separate stack of at least
-`max(stack.bound of every installed handler) + CONTEXT_OVERHEAD`, set up by
-`std` for every thread), and its type limits it to effects within
+thread's signal stack (a separate stack of
+`stack.bound` of an indirect call through `fn(Signal) may sys | panic`, which
+covers every function the program ever converts to that type (11.2.1), plus
+`CONTEXT_OVERHEAD`, set up by `std` for every thread; if that bound is
+unbounded, 64 KiB with a guard page), and its type limits it to effects within
 `sys | panic`, so it cannot allocate or wait, which makes it
 async-signal-safe as far as `std` is concerned.
 

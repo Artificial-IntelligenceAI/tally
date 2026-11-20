@@ -186,6 +186,9 @@ EXP       = ("e" | "E") ["+" | "-"] DIGITS ;
 
 A float literal needs digits on both sides of the point: `1.` and `.5` are not
 float literals. `1.e5` is the integer `1` followed by the field access `.e5`.
+Immediately after a `.` token, a sequence of decimal digits is always lexed
+as a `DEC_LIT` (without underscores), never as part of a float, so that
+`t.0.1` is `t`, `.`, `0`, `.`, `1`.
 Its type comes from context (4.4.3).
 
 ```tally
@@ -301,8 +304,8 @@ let b = big as% u8;    // truncating conversion; `as%` is one token
 **1.5.2** Tokenisation is greedy: at each position the lexer takes the longest
 sequence of characters that forms a token. Thus `a+%b` is `a`, `+%`, `b`, and
 `x..=y` is `x`, `..=`, `y`. Where the grammar needs two tokens that the lexer
-has merged, the parser splits them: `&&` in a position where a prefix operator
-is expected is two `&` tokens, and `||` in a position where a closure may
+has merged, the parser splits them: `&&` in a position where a prefix operator,
+a type or a pattern is expected is two `&` tokens, and `||` in a position where a closure may
 begin is an empty closure parameter list.
 
 ```tally

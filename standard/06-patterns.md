@@ -147,7 +147,7 @@ types.
 ```tally
 for &x in &[1, 2, 3] { total += x; }    // x: i64, copied
 ```
-*From: D60, D22.*
+*From: D60, D23.*
 
 **6.2.10** An or-pattern `p | q` matches if `p` or `q` matches, trying them in
 order. Each alternative must bind exactly the same names, with the same types,

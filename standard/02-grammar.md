@@ -196,7 +196,7 @@ parameter (`..name: T`) must be the last parameter (5.7.5).
 pub fn read(&mut self, buf: &mut []u8) -> usize ! io.Error may sys | block { ... }
 fn flush(&mut self) ! io.Error may sys | block { ... }      // same as -> () ! io.Error
 fn longest(a: &str, b: &str) -> &str from a, b { if a.len() >= b.len() { a } else { b } }
-pub fn println[A: Display](..args: A) may sys | block { ... }
+pub fn println[A: Display](..args: A) may sys | block | panic | A { ... }
 ```
 *From: D12, D24, D31, D47.*
 
@@ -238,7 +238,7 @@ AtomType    = TypePath
             | "(" Type ")"
             | "(" Type "," [ Type % "," ] ")"
             | FnType
-            | "dyn" TraitRef [ EffectClause ] ;
+            | "dyn" TraitRef [ EffectClause ] { "+" TypePath } ;
 TypePath    = TypeSeg { "." TypeSeg } ;
 TypeSeg     = ( IDENT | "Self" ) [ GenericArgs ] ;
 FnType      = [ "unsafe" ] [ "extern" STRING_LIT ] "fn"
@@ -250,6 +250,14 @@ GenericArg  = IDENT "=" ( Type | EffectExpr )
             | ConstArg ;
 ConstArg    = INT_LIT | "-" INT_LIT | CHAR_LIT | "true" | "false" | Block ;
 ```
+
+A `GenericArg` that is a `TypePath` (possibly followed by `| ...`) is
+classified after name resolution by the kind of the parameter it is given
+for: a type, a constant (a path naming a constant) or an effect set. In a
+binding `Name = ...`, the right side is an `EffectExpr` if `Name` is an
+associated effect and a `Type` if it is an associated type. After `dyn`, the
+types following `+` must be `Send` or `Sync`; an effect clause ends at the
+first `+`.
 
 `!` binds more loosely than every prefix constructor: `?u8 ! E` is
 `(?u8) ! E`; write `?(u8 ! E)` for an optional result. `!` does not chain:
@@ -316,10 +324,10 @@ JumpExpr    = "return" [ Expr ]
 ClosureExpr = [ "move" ] ClosureParams [ "->" Type ] [ EffectClause ]
               ( Block | Expr ) ;
 ClosureParams = "||" | "|" [ ClosureParam % "," ] "|" ;
-ClosureParam  = [ "var" ] ( IDENT | "_" ) [ ":" Type ] ;
+ClosureParam  = PatternOne [ ":" Type ] ;      (* irrefutable; 5.8.1 *)
 
 RangeExpr   = [ OrElseExpr ] ( ".." | "..=" ) [ OrElseExpr ] | OrElseExpr ;
-OrElseExpr  = OrExpr [ "orelse" OrElseExpr ] ;
+OrElseExpr  = OrExpr [ "orelse" ( OrElseExpr | JumpExpr ) ] ;
 OrExpr      = AndExpr { "||" AndExpr } ;
 AndExpr     = CmpExpr { "&&" CmpExpr } ;
 CmpExpr     = BitOrExpr [ CmpOp BitOrExpr ] ;
@@ -336,7 +344,7 @@ UnaryExpr   = ( "-" | "!" | "~" | "*" | "&" [ "mut" ] ) UnaryExpr
 PostfixExpr = Primary { Postfix } ;
 Postfix     = "." IDENT
             | "." INT_LIT
-            | "." "[" Type % "," "]"
+            | "." GenericArgs
             | "(" [ Arg % "," ] ")"
             | "[" Expr "]"
             | "?" ;
@@ -365,7 +373,7 @@ LoopExpr    = "loop" Block ;
 WhileExpr   = "while" Cond Block ;
 ForExpr     = "for" Pattern "in" ExprNS Block ;
 MatchExpr   = "match" ExprNS "{" [ MatchArm { MatchArm } ] "}" ;
-MatchArm    = Pattern [ "if" Expr ] "=>" ( BlockExpr [ "," ] | ExprNoBlock "," ) ;
+MatchArm    = { Attribute } Pattern [ "if" Expr ] "=>" ( BlockExpr [ "," ] | ExprNoBlock "," ) ;
 ExprNS      = Expr   (* with no StructLit outside parentheses; 2.10.3 *) ;
 ```
 
@@ -427,17 +435,23 @@ PatternOne  = "_"
             | "(" [ PatElem % "," ] ")"
             | "[" [ PatElem % "," ] "]"
             | PatPath [ "(" [ PatElem % "," ] ")"
-                      | "{" [ FieldPat % "," ] [ ".." ] "}" ] ;
+                      | "{" [ FieldPat % "," ] [ ".." ] "}" ]
+            | ( IDENT | "Self" ) ( "(" [ PatElem % "," ] ")"
+                                 | "{" [ FieldPat % "," ] [ ".." ] "}" ) ;
 LitPat      = Literal | "-" ( INT_LIT | FLOAT_LIT ) | PatPath ;
 PatElem     = Pattern | ".." [ IDENT ] ;
 FieldPat    = [ "var" ] IDENT [ ":" Pattern ] ;
-PatPath     = "." IDENT | IDENT [ "." "[" Type % "," "]" ] "." IDENT { "." IDENT } ;
+PatPath     = "." IDENT | ( IDENT | "Self" ) [ "." GenericArgs ] "." IDENT { "." IDENT } ;
 ```
 
-A `PatPath` always contains at least one `.`; a bare identifier in a pattern
-is always a new binding (6.2.1).
+A `PatPath` always contains at least one `.`. An identifier immediately
+followed by `(` or `{` names a struct, tuple struct or variant; any other
+bare identifier in a pattern is a new binding (6.2.1). `(p)` is the pattern
+`p`; a one-element tuple pattern is written `(p,)`. A `..` element may name a
+binding (`..rest`) only in a slice pattern (6.2.8).
 
 ```tally
+// syntax only: these arms could not all have the same scrutinee type
 match msg {
     .Quit => stop(),
     .Move { x, y: 0 } => horizontal(x),
@@ -473,14 +487,16 @@ pub fn open(path: &str) -> File ! io.Error may sys | block { ... }
 
 ## 2.10 Disambiguation
 
-**2.10.1** At the start of a statement, a `BlockExpr` is parsed as a complete
-statement: the parser does not continue it as the left operand of a binary
-operator, a postfix operation or a cast. To use such an expression as an
-operand, wrap it in parentheses.
+**2.10.1** At the start of a statement, at the start of a match arm's body,
+and as the operand of `defer`, a `BlockExpr` is parsed as complete: the
+parser does not continue it as the left operand of a binary operator, a
+postfix operation or a cast. To use such an expression as an operand, wrap it
+in parentheses.
 
 ```tally
 fn f() -> i64 {
-    match x { _ => 1 } - 1      // statement `match ...`, then tail `-1`
+    match x { _ => g() }        // a complete statement (g returns ()), then
+    - 1                         // the tail expression `-1`
 }
 let n = (match x { _ => 1 }) - 1;   // parenthesised: subtraction
 ```
@@ -511,9 +527,9 @@ let q = .Rect { w: 2.0, h: 3.0 };              // inferred-variant struct litera
 ```
 *From: D10, D2.*
 
-**2.10.4** In a `Postfix`, `.` followed by `INT_LIT` is a tuple field access;
-the lexer's greedy float rule (1.4.2) does not apply after `.`, so `t.0.1` is
-the field `1` of the field `0` of `t`.
+**2.10.4** In a `Postfix`, `.` followed by `INT_LIT` is a tuple field access.
+Because of the lexer rule in 1.4.2, `t.0.1` is the field `1` of the field `0`
+of `t`.
 
 ```tally
 let pair = ((1, 2), 3);
@@ -542,3 +558,24 @@ let f = |x| x * 2 + 1;     // body is x * 2 + 1
 if done { return; }        // no operand: `;` cannot start an expression
 ```
 *From: D10, D54.*
+
+**2.10.7** These forms that the grammar accepts are errors: `pub` on an
+`impl`, a `test`, an `ExternBlock`, a union field or a trait member (their
+visibility is fixed by 3.2.2); a range expression `a..=` without an end; a
+rest parameter that is not last; a closure parameter whose pattern is
+refutable.
+
+```tally
+pub impl Point {}          // error: `pub` on an impl
+let r = 3..=;              // error: inclusive range without an end
+```
+*From: D18, D2.*
+
+**2.10.8** Inside `ClosureParams`, an effect clause at the end of a parameter
+type must be parenthesised, since its `|` would otherwise be read as part of
+the effect expression: `|f: (fn() may sys)| f()`.
+
+```tally
+let call = |f: (fn() may sys)| f();
+```
+*From: D31, D54.*

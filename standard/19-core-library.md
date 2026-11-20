@@ -3,8 +3,8 @@
 `core` is the part of the library that every Tally program can use,
 including freestanding programs. It never makes system calls of its own: no
 function in `core` has the `sys` or `block` effect except through a type or
-callable argument, the volatile operations of 19.4.3, and `core.context`
-(19.16). It includes allocating collections, which use the program's global
+callable argument, the volatile operations of 19.4.3, `core.context` and
+`core.stack.remaining` (19.16), and `core.process.abort` (19.18.2). It includes allocating collections, which use the program's global
 allocator (19.13.5) or an allocator given as a type argument.
 
 Declarations below are written in Tally. A body written `{ ... }`, and a method
@@ -18,13 +18,15 @@ Generic parameters named `A` are always bounded by `Allocator`.
 ## 19.1 Organisation and prelude
 
 **19.1.1** `core` consists of the modules `core.alloc`, `core.atomic`,
-`core.cell`, `core.char`, `core.cmp`, `core.collections`, `core.context`,
+`core.cell`, `core.cmp`, `core.collections`, `core.context`,
 `core.default`, `core.endian`, `core.error`, `core.ffi`, `core.fmt`,
 `core.hash`, `core.hint`, `core.iter`, `core.marker`, `core.math`, `core.mem`,
 `core.num`, `core.ops`, `core.option`, `core.panic`, `core.process`,
 `core.ptr`, `core.result`, `core.slice`, `core.source`, `core.stack`,
-`core.str`, `core.target`, `core.time`. The root module `core` re-exports
-nothing.
+`core.text`, `core.chars`, `core.target`, `core.time`. (The modules for
+string and character functions are named `text` and `chars` so that they do
+not shadow the primitive types `str` and `char`.) The root module `core`
+re-exports nothing.
 
 ```tally
 import core.mem;
@@ -74,7 +76,9 @@ let v: Vec[u8] = Vec.default();      // empty
 pub trait Clone { effect Clone = none; fn clone(&self) -> Self ! AllocError may Self.Clone; }
 ```
 
-`Clone` is implemented with effect `none` by every `Copy` type, by `&T`, and by
+`Clone` is implemented with effect `none` by each primitive type, by shared
+references, raw and function pointers, by every type that derives `Copy`
+(16.3.3), by arrays and tuples of such types (7.9.2), and by
 `Rc` and `Arc` (which copy a pointer and increment a count); with effect
 `T | A` by `Vec[T, A]`, `Box[T, A]` and `HashMap`/`HashSet` (which allocate
 through `A` and clone elements); by `String[A]` with effect `A`.
@@ -153,7 +157,7 @@ pub trait Error: Display + Debug {
 `AllocError`, the library's parse errors and `std.io.Error` implement it.
 
 ```tally
-fn report(e: &dyn Error) may sys | block {
+fn report(e: &dyn Error) may sys | block | panic {
     io.eprintln("error: ", e);
     var cur = e.source();
     while let .Some(s) = cur { io.eprintln("  caused by: ", s); cur = s.source(); }
@@ -204,7 +208,7 @@ impl[T] *T {
     pub fn cast_mut(self) -> *mut T;
     pub fn addr(self) -> usize;                       // 13.4.1
     pub fn expose(self) -> usize;
-    pub fn with_addr(self, a: usize) -> *T;           // a must not be 0: panics if it is
+    pub fn with_addr(self, a: usize) -> *T may panic; // panics if a is 0
     pub fn is_aligned(self) -> bool;
 }
 impl[T] *mut T {
@@ -219,8 +223,8 @@ impl[T] *mut T {
 ```
 
 and in `core.ptr`: `pub fn dangling[T]() -> *mut T` (non-null, aligned, not
-dereferenceable), `pub unsafe fn from_exposed[T](a: usize) -> *mut T` (13.4.1;
-panics if `a` is 0), `pub fn eq[T: ?Sized](a: *T, b: *T) -> bool` (address and
+dereferenceable), `pub unsafe fn from_exposed[T](a: usize) -> *mut T may panic`
+(13.4.1; panics if `a` is 0), `pub fn eq[T: ?Sized](a: *T, b: *T) -> bool` (address and
 metadata equality).
 
 ```tally
@@ -230,8 +234,8 @@ unsafe { p.add(3).write(7); }
 *From: D36.*
 
 **19.4.3** Volatile operations (`read_volatile`, `write_volatile`) are the
-only `core` operations with the `sys` effect apart from those in
-`core.context`; they are primitive sources of `sys` (10.7.1).
+primitive sources of `sys` (10.7.1); see the chapter introduction for the
+other `core` functions with `sys`.
 
 ```tally
 unsafe { (GPIO_OUT as *mut u32).write_volatile(1 << 5); }   // GPIO_OUT: a *mut u32 from from_exposed
@@ -335,12 +339,12 @@ impl str {
     pub fn is_empty(&self) -> bool;
     pub fn as_bytes(&self) -> &[]u8 from self;
     pub fn as_ptr(&self) -> *u8;
-    pub fn chars(&self) -> str.Chars from self;                   // Iterator[Item = char]
-    pub fn char_indices(&self) -> str.CharIndices from self;      // Item = (usize, char)
+    pub fn chars(&self) -> text.Chars from self;                   // Iterator[Item = char]
+    pub fn char_indices(&self) -> text.CharIndices from self;      // Item = (usize, char)
     pub fn bytes(&self) -> slice.Iter[u8] from self;
-    pub fn lines(&self) -> str.Lines from self;                   // splits on \n, strips a trailing \r
-    pub fn split(&self, sep: char) -> str.Split from self;        // Item = &str
-    pub fn split_str(&self, sep: &str) -> str.SplitStr from self may panic;   // panics if sep is empty
+    pub fn lines(&self) -> text.Lines from self;                   // splits on \n, strips a trailing \r
+    pub fn split(&self, sep: char) -> text.Split from self;        // Item = &str
+    pub fn split_str(&self, sep: &str) -> text.SplitStr from self, sep may panic;   // panics if sep is empty
     pub fn trim(&self) -> &str from self;                         // Unicode White_Space at both ends
     pub fn trim_start(&self) -> &str from self;
     pub fn trim_end(&self) -> &str from self;
@@ -352,7 +356,7 @@ impl str {
     pub fn eq_ignore_ascii_case(&self, o: &str) -> bool;
     pub fn parse[T: FromStr](&self) -> T ! T.Err may T;
 }
-pub fn from_utf8(b: &[]u8) -> &str ! Utf8Error from b;            // in module core.str
+pub fn from_utf8(b: &[]u8) -> &str ! Utf8Error from b;            // in module core.text
 pub unsafe fn from_utf8_unchecked(b: &[]u8) -> &str from b;
 pub trait FromStr { type Err; effect Parse = none; fn from_str(s: &str) -> Self ! Self.Err may Self.Parse; }
 ```
@@ -369,7 +373,7 @@ let n = "42".parse.[u32]()?;
 ```
 *From: D46, D57.*
 
-**19.6.2** Methods of `char`, in `core.char`:
+**19.6.2** Methods of `char` (with the function `from_digit` in `core.chars`):
 
 ```tally
 impl char {
@@ -552,9 +556,10 @@ pub fn min[T: Ord](a: T, b: T) -> T may T;
 ```
 
 `Ord` is implemented with effect `none` by integers, `char`, `bool`
-(`false < true`), `()`, `str` and slices of `Ord` types (lexicographic,
-shorter prefix first), arrays, tuples, references to `Ord` types (by
-referent), `?T` (`None` first) and `String`. Floats do not implement `Ord`.
+(`false < true`), `()`, `str` and `String`; and with `Cmp` equal to the union
+of the elements' `Cmp` effects by slices and arrays of `Ord` types
+(lexicographic, shorter prefix first), tuples, references to `Ord` types (by
+referent) and `?T` (`None` first). Floats do not implement `Ord`.
 
 ```tally
 let longest = max(a.len(), b.len());
@@ -571,20 +576,20 @@ pub trait Iterator {
     effect Next;
     fn next(&mut self) -> ?Self.Item may Self.Next;
     // provided methods (Self: Sized where they take self by value):
-    fn count(self) -> usize may Self | panic { ... }
-    fn last(self) -> ?Self.Item may Self { ... }
-    fn nth(&mut self, n: usize) -> ?Self.Item may Self { ... }
+    fn count(self) -> usize may Self | Self.Item | panic { ... }
+    fn last(self) -> ?Self.Item may Self | Self.Item { ... }
+    fn nth(&mut self, n: usize) -> ?Self.Item may Self | Self.Item { ... }
     fn fold[B, F: FnMut(B, Self.Item) -> B](self, init: B, f: F) -> B may Self | F { ... }
     fn for_each[F: FnMut(Self.Item)](self, f: F) may Self | F { ... }
     fn any[F: FnMut(Self.Item) -> bool](&mut self, f: F) -> bool may Self | F { ... }
     fn all[F: FnMut(Self.Item) -> bool](&mut self, f: F) -> bool may Self | F { ... }
-    fn find[P: FnMut(&Self.Item) -> bool](&mut self, p: P) -> ?Self.Item may Self | P { ... }
+    fn find[P: FnMut(&Self.Item) -> bool](&mut self, p: P) -> ?Self.Item may Self | Self.Item | P { ... }
     fn position[P: FnMut(Self.Item) -> bool](&mut self, p: P) -> ?usize may Self | P | panic { ... }
     fn map[U, F: FnMut(Self.Item) -> U](self, f: F) -> Map[Self, F] { ... }
     fn filter[P: FnMut(&Self.Item) -> bool](self, p: P) -> Filter[Self, P] { ... }
     fn enumerate(self) -> Enumerate[Self] { ... }
-    fn zip[J: IntoIterator](self, other: J) -> Zip[Self, J.IntoIter] may J { ... }
-    fn chain[J: IntoIterator[Item = Self.Item]](self, other: J) -> Chain[Self, J.IntoIter] may J { ... }
+    fn zip[J: Iterator](self, other: J) -> Zip[Self, J] { ... }
+    fn chain[J: Iterator[Item = Self.Item]](self, other: J) -> Chain[Self, J] { ... }
     fn take(self, n: usize) -> Take[Self] { ... }
     fn skip(self, n: usize) -> Skip[Self] { ... }
     fn peekable(self) -> Peekable[Self] { ... }
@@ -600,10 +605,12 @@ pub trait FromIterator[T] {
 }
 ```
 
-Every `Iterator` implements `IntoIterator` as itself. The adapter structs
-(`Map`, `Filter`, `Enumerate`, `Zip`, `Chain`, `Take`, `Skip`, `Peekable`)
-implement `Iterator` with `effect Next` equal to the union of their parts'
-type effects; `Enumerate` panics if the count overflows `usize`, so its
+There is no blanket implementation of `IntoIterator` for iterators (it would
+overlap the others under 7.4.2); `for` accepts either (5.10.6). The adapter
+structs (`Map`, `Filter`, `Enumerate`, `Zip`, `Chain`, `Take`, `Skip`,
+`Peekable`) implement `Iterator` with `effect Next` equal to the union of
+their parts' type effects (including `Self.Item` for `Filter` and `Skip`,
+which drop items); `Enumerate` panics if the count overflows `usize`, so its
 `Next` includes `panic`. `Peekable` adds `peek(&mut self) -> ?&Self.Item from
 self`. `Vec`, `String`, `HashMap` and `HashSet` implement `FromIterator` with
 `Build` equal to their allocator's effects.
@@ -639,8 +646,14 @@ impl[T] UnsafeCell[T] {
     pub fn into_inner(self) -> T;
 }
 pub struct Cell[T] { ... }                             // Send if T: Send; not Sync
-impl[T: Copy] Cell[T] { pub fn new(v: T) -> Self; pub fn get(&self) -> T; pub fn set(&self, v: T); }
-impl[T] Cell[T] { pub fn replace(&self, v: T) -> T; pub fn take(&self) -> T where T: Default; }
+impl[T] Cell[T] {
+    pub fn new(v: T) -> Self;
+    pub fn replace(&self, v: T) -> T;
+    pub fn set(&self, v: T) may T;                     // drops the old value
+    pub fn take(&self) -> T where T: Default;
+    pub fn into_inner(self) -> T;
+}
+impl[T: Copy] Cell[T] { pub fn get(&self) -> T; }
 pub struct RefCell[T] { ... }                          // run-time checked borrowing; not Sync
 impl[T] RefCell[T] {
     pub fn new(v: T) -> Self;
@@ -684,10 +697,15 @@ impl[T] Atomic[T] {
     pub fn get_mut(&mut self) -> &mut T from self;
     pub fn into_inner(self) -> T;
 }
-// for integer T only (wrapping arithmetic; return the previous value):
-//   fetch_add, fetch_sub, fetch_and, fetch_or, fetch_xor, fetch_max, fetch_min
+impl[I] Atomic[I] {                                     // for integer I only; wrapping; return the previous value
+    pub fn fetch_add(&self, v: I, o: Ordering) -> I;  pub fn fetch_sub(&self, v: I, o: Ordering) -> I;
+    pub fn fetch_and(&self, v: I, o: Ordering) -> I;  pub fn fetch_or(&self, v: I, o: Ordering) -> I;
+    pub fn fetch_xor(&self, v: I, o: Ordering) -> I;  pub fn fetch_max(&self, v: I, o: Ordering) -> I;
+    pub fn fetch_min(&self, v: I, o: Ordering) -> I;
+}
+impl Atomic[bool] { pub fn fetch_and(&self, v: bool, o: Ordering) -> bool; pub fn fetch_or(&self, v: bool, o: Ordering) -> bool; }
 pub fn fence(o: Ordering) may panic;           // panics if o is Relaxed
-pub fn compiler_fence(o: Ordering) may panic;
+pub fn compiler_fence(o: Ordering) may panic;  // panics if o is Relaxed
 ```
 
 `compare_exchange` panics if `fail` is `Release` or `AcqRel`. When the
@@ -710,8 +728,9 @@ pub trait Hash { fn hash[H: Hasher](&self, h: &mut H) may panic; }
 pub trait BuildHasher { type Hasher: Hasher; fn build(&self) -> Self.Hasher; }
 ```
 
-Integers hash by writing their little-endian bytes (`bool` as one byte, `char`
-as `u32`); `str` writes its bytes followed by the byte `0xFF`; slices and
+Integers hash by writing the little-endian bytes of their storage (4.2.2),
+holding the zero- or sign-extended value (`bool` as one byte, `char` as
+`u32`); `str` writes its bytes followed by the byte `0xFF`; slices and
 arrays write their length as `u64` and then each element; tuples write each
 element; `?T` writes the tag as `u64` then the payload; references hash their
 referent. Floats do not implement `Hash`.
@@ -782,10 +801,11 @@ until passed to `deallocate`, `grow` or `shrink`; zero-size requests return a
 non-null aligned pointer that must not be accessed; the allocator's blocks
 stay valid as long as any reference to the allocator (or the allocator value)
 can be used. `&A` implements `Allocator` whenever `A` does, with the same
-`Use`.
+`Use` (this is the only implementation of `Allocator` for a reference type,
+so it overlaps nothing).
 
 ```tally
-unsafe impl Allocator for &Bump { effect Use = none; ... }
+unsafe impl Allocator for Bump { effect Use = none; ... }   // and so &Bump implements it too
 ```
 *From: D32, D36.*
 
@@ -801,7 +821,7 @@ impl Bump {
     pub fn used(&self) -> usize;
     pub fn reset(&mut self);                 // requires no outstanding borrows of the Bump
 }
-unsafe impl Allocator for &Bump { effect Use = none; ... }   // deallocate frees only the most recent block
+unsafe impl Allocator for Bump { effect Use = none; ... }    // deallocate frees only the most recent block
 ```
 
 Because collections using `&Bump` borrow it, `reset` cannot be called while
@@ -851,7 +871,7 @@ impl[T] Box[T, Global] { pub fn new(v: T) -> Self ! AllocError may alloc | T; }
 impl[T, A: Allocator] Box[T, A] {
     pub fn new_in(v: T, a: A) -> Self ! AllocError may A | T;
     pub fn into_inner(b: Self) -> T may A;
-    pub fn leak(b: Self) -> &mut T;               // never freed; region static
+    pub fn leak(b: Self) -> &mut T;               // never freed; region static unless T or A holds borrows
     pub fn into_raw(b: Self) -> *mut T;
     pub unsafe fn from_raw_in(p: *mut T, a: A) -> Self;
 }
@@ -963,9 +983,20 @@ impl[K: Hash + Eq, V, S: BuildHasher, A: Allocator] HashMap[K, V, S, A] {
 ```
 
 (The `panic` effect comes from `Hash`.) `HashSet[T, S = RandomSip, A =
-Global]` provides `new`, `with_hasher_in`, `len`, `is_empty`, `contains`,
-`insert` (returns `bool ! AllocError`, `true` if newly added), `remove`,
-`clear`, `iter` with the corresponding effects.
+Global]`:
+
+```tally
+impl[T] HashSet[T, RandomSip, Global] { pub fn new() -> Self; }
+impl[T: Hash + Eq, S: BuildHasher, A: Allocator] HashSet[T, S, A] {
+    pub fn with_hasher_in(s: S, a: A) -> Self;
+    pub fn len(&self) -> usize; pub fn is_empty(&self) -> bool;
+    pub fn contains(&self, x: &T) -> bool may panic;
+    pub fn insert(&mut self, x: T) -> bool ! AllocError may A | T | panic;   // true if newly added
+    pub fn remove(&mut self, x: &T) -> bool may T | panic;
+    pub fn clear(&mut self) may T;
+    pub fn iter(&self) -> collections.HashSetIter[T] from self;            // Item = &T
+}
+```
 
 ```tally
 var counts: HashMap[String, u32] = HashMap.new();
@@ -1005,7 +1036,7 @@ let s2 = shared.clone()?;      // cannot fail; ? is required by the Clone signat
 ```tally
 @derive(Copy, Eq, Debug) pub struct FmtError;
 pub trait Sink { effect Write; fn write_str(&mut self, s: &str) ! FmtError may Self.Write; }
-pub struct Formatter[effect E] { ... }         // wraps &mut dyn Sink may E
+pub view struct Formatter[effect E] { ... }    // wraps &mut dyn Sink may E
 impl[effect E] Formatter[E] {
     pub fn new(sink: &mut dyn Sink may E) -> Formatter[E] from sink;
     pub fn write_str(&mut self, s: &str) ! FmtError may E;
@@ -1016,8 +1047,8 @@ pub trait Display {
     fn to_string(&self) -> String ! AllocError may alloc | panic { ... }
 }
 pub trait Debug { fn fmt[effect E](&self, f: &mut Formatter[E]) ! FmtError may E | panic; }
-pub fn write[S: Sink, X: Display](s: &mut S, ..args: X) ! FmtError may S.Write | panic;
-pub fn format[X: Display](..args: X) -> String ! AllocError may alloc | panic;
+pub fn write[S: Sink, X: Display](s: &mut S, ..args: X) ! FmtError may S.Write | panic | X;
+pub fn format[X: Display](..args: X) -> String ! AllocError may alloc | panic | X;
 ```
 
 `String`, `Vec[u8]` and `core.fmt.FixedBuf[N]` (a `[N]u8` buffer that reports
@@ -1049,12 +1080,25 @@ fmt.format(1e21)?             // "1.0e+21"
 *From: D47, D2.*
 
 **19.15.3** `core.fmt` provides wrapper types implementing `Display` for
-formatting options, built by functions: `hex(x)` and `hex_upper(x)`
-(integers, no prefix), `bin(x)`, `oct(x)`, `pad_left(x, width, fill: char)`,
-`pad_right(x, width, fill)`, `zero_pad(x, width)` (integers; sign first),
-`fixed(x, digits)` (floats with exactly `digits` digits after the point,
-correctly rounded, ties to even), `sci(x, digits)`, and `debug(x)` (writes
-`Debug` output).
+formatting options, each built by a function and each a `view` (it borrows
+or holds its argument):
+
+```tally
+pub fn hex[I](x: I) -> Hex[I];            // I: an integer type; lowercase digits, no prefix; negative as `-` then magnitude
+pub fn hex_upper[I](x: I) -> HexUpper[I];
+pub fn bin[I](x: I) -> Bin[I];
+pub fn oct[I](x: I) -> Oct[I];
+pub fn pad_left[X: Display](x: X, width: usize, fill: char) -> PadLeft[X];    // fill before the output
+pub fn pad_right[X: Display](x: X, width: usize, fill: char) -> PadRight[X];  // fill after the output
+pub fn zero_pad[X: Display](x: X, width: usize) -> ZeroPad[X];   // like pad_left with '0', but a leading '-' stays first
+pub fn fixed[F](x: F, digits: u32) -> Fixed[F];   // F: f32 or f64; exactly `digits` digits after the point, correctly rounded, ties to even
+pub fn sci[F](x: F, digits: u32) -> Sci[F];       // d.ddd e±x with `digits` digits after the point
+pub fn debug[X: Debug](x: X) -> DebugOf[X];       // writes Debug output
+```
+
+Widths count Unicode scalar values of the inner output; output already at
+least `width` long is not padded or truncated. Each wrapper's `Display`
+effects are those of its inner value's `Display` plus `panic`.
 
 ```tally
 io.println("addr=0x", fmt.zero_pad(fmt.hex(addr), 16), " t=", fmt.fixed(secs, 3));
@@ -1070,7 +1114,7 @@ pub fn bound[F: ?Sized](f: &F) -> ?usize;            // 11.5.2; F: a function it
 pub fn bound_required[F: ?Sized](f: &F) -> usize;    // link error if unbounded
 pub const CALL_OVERHEAD: usize;                      // target-defined bytes added to every bound
 pub const CONTEXT_OVERHEAD: usize;                   // link-time: per-context control block and switch frame
-pub fn remaining() -> usize may sys;                 // bytes left on the current context's stack (approximate)
+pub fn remaining() -> usize may sys;                 // bytes left on the current context's stack, rounded down to 16
 ```
 
 `CONTEXT_OVERHEAD` includes the space for context-local statics (15.5.2), so
@@ -1086,20 +1130,32 @@ fibers are built:
 
 ```tally
 pub struct Context { ... }                        // an execution context control block
-pub unsafe fn init(ctx: *mut Context, stack: *mut u8, size: usize, entry: fn(*mut u8) -> never, arg: *mut u8) may sys;
+pub unsafe fn init(ctx: *mut Context, stack: *mut u8, size: usize, entry: fn(*mut u8) -> never may any, arg: *mut u8) may sys;
 pub unsafe fn switch(from: *mut Context, to: *mut Context) may sys;   // saves registers, resumes `to`
 pub fn current() -> *mut Context;
 pub unsafe trait Waiter {
-    fn wait(&self, what: &Wait) ! WaitError may sys;   // suspend the current fiber until `what` is ready
+    fn wait(&self, what: &Wait) ! WaitError may sys | block;   // suspend the current fiber until `what` is ready
     fn wake(&self, ctx: *mut Context) may sys;         // make a suspended context runnable
 }
 pub fn waiter() -> ?&dyn Waiter may sys;           // the current context's waiter (15.4.2)
 pub unsafe fn set_waiter(w: ?&dyn Waiter);
 ```
 
-`Wait` is a `@non_exhaustive` enum describing what to wait for: file
-descriptor readiness, a timer deadline, a futex-like address and value, or a
-child process. `switch` uses at most a target-defined number of bytes of
+`Wait` and `WaitError` are declared as:
+
+```tally
+@non_exhaustive pub enum Wait {
+    Readable(i32), Writable(i32),           // a file descriptor (Unix) or socket handle
+    Deadline(Instant),                      // until a monotonic-clock instant (time.Instant)
+    Address { addr: *Atomic[u32], expected: u32 },   // until woken, if *addr == expected on entry
+    Child(u32),                             // a child process id has exited
+    Handle(usize),                          // a platform handle (Windows) is signalled
+}
+@non_exhaustive @derive(Copy, Eq, Debug) pub enum WaitError { TimedOut, Os(i32) }
+```
+
+`core.time.Instant` is the monotonic clock instant type that `std.time`
+re-exports (20.6.1); in `core` it has no `now`. `switch` uses at most a target-defined number of bytes of
 `from`'s stack, which is included in `CONTEXT_OVERHEAD`.
 
 ```tally
@@ -1128,7 +1184,7 @@ zero-terminated byte sequence without interior zeros:
 impl CStr {
     pub fn as_ptr(self) -> *c_char;
     pub fn to_bytes(self) -> &[]u8 from self;              // without the terminator
-    pub fn to_str(self) -> &str ! str.Utf8Error from self;
+    pub fn to_str(self) -> &str ! text.Utf8Error from self;
     pub unsafe fn from_ptr(p: *c_char) -> CStr;            // scans for the terminator
     pub fn from_bytes_with_nul(b: &[]u8) -> CStr ! CStrError from b;
 }
@@ -1150,7 +1206,7 @@ unsafe { c_open(name.as_cstr().as_ptr(), 0); }
 
 ```tally
 pub fn panic[X: Display](..args: X) -> never may panic;       // 12.4.3
-pub fn assert[X: Display](cond: bool, ..msg: X) may panic;    // panics with "assertion failed" and msg
+pub fn assert[X: Display](cond: bool, ..msg: X) may panic | X;    // panics with "assertion failed" and msg
 pub fn assert_eq[T: Eq + Debug](a: T, b: T) may panic | T;    // message shows both values' Debug output
 pub fn unreachable() -> never may panic;                      // "entered unreachable code"
 pub fn todo() -> never may panic;                             // "not yet implemented"
@@ -1182,8 +1238,9 @@ while lock.load(.Relaxed) { hint.spin(); }
 ```
 *From: D36, D2.*
 
-**19.18.4** `core.source.Location` is `@derive(Copy, Eq, Debug) pub struct
-Location { pub file: &str, pub line: u32, pub column: u32 }`, where `file` is
+**19.18.4** `core.source.Location` is `@derive(Copy, Eq, Debug) pub view
+struct Location { pub file: &str, pub line: u32, pub column: u32 }` (its
+`file` always refers to static data), where `file` is
 the path relative to the package directory and `line` and `column` count from
 1 (columns in Unicode scalar values). `core.source.location() -> Location`
 returns the location of its own call, unless it is called from a function

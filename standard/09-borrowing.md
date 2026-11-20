@@ -327,7 +327,7 @@ closure value is live, those loans are in scope.
 
 ```tally
 var count = 0;
-var inc = || count += 1;      // exclusive loan of count
+var inc = || { count += 1; };   // exclusive loan of count
 print(count);                 // error: count is exclusively borrowed by inc, used below
 inc();
 ```

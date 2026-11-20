@@ -78,7 +78,7 @@ passed to a scheduler on another thread does.
 ```tally
 let rc = Rc.new(5)?;
 thread.spawn(move || print(*rc));      // error: Rc[i64] is not Send
-_ = fiber.run_all([move || print(*rc)]);  // fine: fibers stay on this thread
+_ = fiber.run_all([move || print(*rc)].into_iter());  // fine: fibers stay on this thread
 ```
 *From: D26, D34.*
 
@@ -115,9 +115,10 @@ which synchronise.
 
 ```tally
 var n = 0;
-let a = || n += 1;
-let b = || n += 1;              // error: n is already exclusively borrowed by a (9.5.5)
-_ = thread.run_all([a, b]);
+let a = || { n += 1; };
+let b = || { n += 1; };         // error: n is already exclusively borrowed by a (9.5.5)
+a();
+b();
 ```
 *From: D35, D26.*
 
@@ -127,7 +128,7 @@ different schedulers, can race like threads.
 
 ```tally
 let c = Cell.new(0);
-fiber.run(&c, |fs| {
+_ = fiber.run(&c, |fs| {
     _ = fs.spawn(|s| s.env().set(s.env().get() + 1));
     _ = fs.spawn(|s| s.env().set(s.env().get() + 1));   // fine: Cell is not Sync, but fibers share a thread
 });
@@ -156,7 +157,7 @@ until the waiter resumes it. Foreign functions and `asm` always block the
 whole thread.
 
 ```tally
-fn handle(c: &mut TcpStream) ! io.Error may sys | block {
+fn handle(c: &mut TcpStream) ! io.Error may sys | block | panic {
     var buf: [512]u8 = [0; 512];
     let n = c.read(&mut buf)?;     // in a thread: blocking read(2); in a fiber: suspends the fiber
     c.write_all(&buf[0..n])
@@ -199,6 +200,6 @@ function's body.
 
 ```tally
 @context_local static REQUEST_ID: Cell[u64] = Cell.new(0);
-fn log(msg: &str) may sys | block { io.eprintln("[", REQUEST_ID.get(), "] ", msg); }
+fn log(msg: &str) may sys | block | panic { io.eprintln("[", REQUEST_ID.get(), "] ", msg); }
 ```
 *From: D34.*
