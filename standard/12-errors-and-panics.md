@@ -39,7 +39,10 @@ respectively (a result operand in an optional-returning function, or the
 reverse, is an error). If `e` is `.Ok(v)` or `.Some(v)`, `e?` evaluates to
 `v`. Otherwise `e?` returns from the function: with `.None`, or with
 `.Err(c)`, where `c` is the error converted by 12.2.2. The return runs the
-same drops and deferred expressions as a `return` would.
+same drops and deferred expressions as a `return` would. In a closure without
+a declared return type, the first `?` in its body (in source order) fixes the
+closure's return type as `R ! E1` (or `?R`) with `R` a fresh inference
+variable and `E1` the operand's error type, so no conversion happens there.
 
 ```tally
 fn read_config(path: &str) -> Config ! ConfigError may sys | block | alloc | panic {
