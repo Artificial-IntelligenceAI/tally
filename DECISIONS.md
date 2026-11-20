@@ -288,3 +288,119 @@ target Tally cares about. Rust is the most productive memory-safe language
 with mature LLVM bindings, so the bootstrap compiler can itself be trusted.
 Self-hosting later is the best long-term test that the language is good at the
 programs it was designed for, and a compiler is such a program.
+
+---
+
+## D8. Source text: UTF-8, ASCII identifiers
+
+**Chosen.** Source files are UTF-8. Identifiers and keywords use only ASCII
+letters, digits and underscores. String literals, character literals and
+comments may contain any Unicode text.
+
+**Alternatives weighed.** Unicode identifiers following UAX #31 (Rust, Swift,
+Go); ASCII-only source (Zig's early position).
+
+**Why.** Unicode identifiers let non-English speakers name things in their
+own language, which is a real loss. But they bring homoglyph and
+normalisation problems (two different identifiers that render identically,
+which matters for code review of security-sensitive systems code), make
+tools more complex, and are little used in systems code, which is shared
+across countries. Predictability (D2.1) and toolability (D2.5) win. Text in
+strings and comments has none of these problems and stays Unicode.
+
+---
+
+## D9. Only line comments
+
+**Chosen.** Comments start with `//` and run to the end of the line. `///`
+starts a documentation comment for the following item and `//!` a
+documentation comment for the enclosing module. There are no block comments.
+
+**Alternatives weighed.** C-style `/* */` (non-nesting) or Rust-style nesting
+block comments.
+
+**Why.** Every line of a comment is visibly a comment, so a reader can never
+mistake commented-out code for live code, and the lexer has no nesting state.
+Editors comment out regions line by line. This follows Zig.
+
+---
+
+## D10. Explicit semicolons; blocks are expressions
+
+**Chosen.** Statements end with `;`. A block `{ ... }` is an expression whose
+value is its final expression if that expression has no trailing `;`, and `()`
+otherwise. Expressions that end in a block (`if`, `match`, `loop`, `while`,
+`for`, blocks) do not need a `;` when used as statements.
+
+**Alternatives weighed.** Go-style automatic semicolon insertion at line ends;
+significant indentation.
+
+**Why.** Automatic insertion was tried in the design and failed on two
+common shapes: a block whose value is its last line (the inserted semicolon
+erases the distinction between `{ x }` and `{ x; }`), and method chains or
+enum-variant patterns that begin a line with `.`, where any rule that joins
+lines breaks match arms of the form `.None => 0`. Explicit semicolons have no
+exceptions to learn, and the canonical formatter (D51) makes them cost nothing
+to write. This is Rust's rule.
+
+---
+
+## D11. Attributes are written `@name(...)`
+
+**Chosen.** Attributes, which attach compiler-visible information to items,
+fields, statements and expressions, are written `@name` or `@name(args)`
+before the thing they apply to. Documentation comments are a form of
+attribute.
+
+**Alternatives weighed.** Rust's `#[name(args)]`; C++'s `[[name]]`; keywords
+for each property.
+
+**Why.** `@` is a single character with no other use in Tally, so attributes
+are short and unambiguous. A single attribute syntax, rather than a keyword
+per property, keeps the keyword list small and gives vendor extensions a
+namespace (`@vendor_*`) that cannot collide with future keywords.
+
+---
+
+## D12. Type syntax is prefix; results are written `T ! E`
+
+**Chosen.** Type constructors are written before the type they apply to and
+read left to right: `[4]u8` (array of four bytes), `[]u8` (slice of bytes),
+`&mut []u8`, `?&T` (optional reference), `*T` (raw pointer). A function that
+can fail returns `T ! E`, read "T or error E". A function returning nothing
+but able to fail may write `! E` instead of `-> () ! E`.
+
+**Alternatives weighed.** C's declarator syntax (types read inside out);
+Rust's mixture (`[u8; 4]`, `Option<&T>`, `Result<T, E>`); postfix
+constructors (`u8[4]`).
+
+**Why.** Prefix syntax can be read aloud in order, nests without parentheses
+and never needs the spiral rule. Optional and result types appear in nearly
+every signature in a language with errors as values, so they get one
+character each. `!` was chosen over `|` or `or` because `|` is used for effect
+unions (D31) and `!` already suggests "something went wrong". This follows
+Zig, except that Zig writes the error set first (`E!T`); Tally puts the
+success type first because it is what the reader looks for first.
+
+---
+
+## D13. Generic arguments use square brackets; `.[` in expressions
+
+**Chosen.** Generic parameters and arguments are written in square brackets:
+`Vec[u8]`, `fn max[T: Ord](a: T, b: T) -> T`. In expression position,
+explicit generic arguments are written after `.`: `mem.size_of.[u32]()`,
+`Vec.[u8].new()`. In type position the dot is not used.
+
+**Alternatives weighed.** Angle brackets (`Vec<u8>`), which make `<` and `>`
+ambiguous with comparisons and force Rust's `::<>` turbofish and C++'s
+`template` disambiguator; square brackets in expressions without a dot (Go),
+which make `f[x]` mean either indexing or instantiation and require the parser
+or type checker to guess, and which make type arguments like `&T` or `[4]u8`
+ambiguous with expressions.
+
+**Why.** Square brackets never conflict with comparisons. Requiring `.[` in
+expressions keeps the grammar context-free: `a[i]` is always indexing, and
+everything inside `.[ ]` is parsed as types. Explicit arguments are rare in
+expressions because local inference (D63) usually finds them, so the extra
+dot is seldom written. This is the same idea as Rust's turbofish with a
+lighter spelling.
