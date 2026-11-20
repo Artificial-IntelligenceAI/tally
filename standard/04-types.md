@@ -236,7 +236,7 @@ pointer to `[]T` holds the address of the first element and the length.
 ```tally
 fn sum(xs: &[]u32) -> u64 may panic {
     var s: u64 = 0;
-    for x in xs { s += *x; }
+    for x in xs { s += *x as u64; }
     s
 }
 let arr = [1, 2, 3];

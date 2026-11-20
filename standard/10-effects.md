@@ -336,7 +336,7 @@ whose only generic parameters are effect parameters is still object-safe
 (7.10.1).
 
 ```tally
-pub struct Formatter[effect E] { sink: &mut dyn Sink may E, ... }
+pub view struct Formatter[effect E] { sink: &mut dyn Sink may E, ... }
 pub trait Display { fn fmt[effect E](&self, f: &mut Formatter[E]) ! FmtError may E | panic; }
 let d: &dyn Display = &x;     // fine: fmt is generic only over an effect
 ```
