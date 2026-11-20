@@ -753,3 +753,166 @@ for a type in at most two packages and adding an implementation in a
 dependency can never break a dependent's existing impls in surprising ways.
 Specialisation was rejected because it makes which code runs depend on
 distant impls, against D2.3.
+
+---
+
+## D28. Four built-in effects, plus effects declared by libraries
+
+**Chosen.** The built-in effects are `alloc` (uses the global heap), `block`
+(may wait for something outside the current thread of execution), `panic`
+(may stop the program) and `sys` (talks to anything outside the program's own
+memory: system calls, memory-mapped hardware, foreign code, assembly).
+Packages may declare further effects with `effect name;`; such an effect has
+no built-in meaning and enters a function's cost only through declarations,
+from which it then propagates like any other.
+
+**Alternatives weighed.** A larger fixed set (separate effects for I/O,
+network, file system, time, randomness, locking, spinning, unbounded loops);
+a single "impure" bit; only user-defined effects.
+
+**Why.** Each built-in effect corresponds to a requirement that real systems
+code states and that is currently enforced by hand: no allocation (real-time
+and interrupt code), no waiting (interrupt handlers, executors, signal
+handlers, latency-critical paths), no crashing (fault handlers, destructors,
+safety-critical paths), no outside interaction (pure computation, plugin
+sandboxes, auditing dependencies). Finer splits of `sys` (file vs network)
+were rejected because the boundary between them is the operating system's
+choice, not the program's, and libraries that want such distinctions can
+declare their own effects. Termination and time bounds were rejected because
+they cannot be checked without proofs.
+
+---
+
+## D29. Effects are written in public signatures and inferred elsewhere
+
+**Chosen.** A public function, every trait method declaration, every
+function pointer type and every `dyn` type has exactly the effects its `may`
+clause lists; no clause means no effects. Package-visible functions and
+closures without a clause have their effects inferred from their bodies;
+with a clause, the clause is checked. Foreign function declarations must
+have a clause.
+
+**Alternatives weighed.** Inference everywhere with tooling to show results
+(rejected in D3 because API effects could change silently); mandatory clauses
+everywhere (too verbose inside a package, where the author controls every
+caller); "no clause means any effect" for public items (would make the
+feature opt-in again).
+
+**Why.** The package is the unit at which code is versioned, reviewed and
+published, so it is where costs must be contracts (D2.1). Inside a package,
+the author sees and changes all callers together, so inference costs nothing
+in predictability and removes most annotations. Making "no clause" mean
+"none" for public items means the shortest signature is the strongest
+promise, and adding a cost always requires writing it down.
+
+---
+
+## D30. Effect polymorphism through type terms, associated effects and erased effect parameters
+
+**Chosen.** Generic code refers to the effects of its type parameters: in a
+`may` clause, a type parameter `T` stands for all effects associated with
+`T`'s bounds plus the effects of dropping a `T`, and `T.Name` stands for one
+associated effect. Traits declare *associated effects* (`effect Next;`) that
+each impl binds (`effect Next = sys | block;`), the effect counterpart of
+associated types. Functions, structs and traits may also take explicit
+`effect E` parameters. Effects have no run-time representation, so effect
+parameters never cause additional monomorphised copies, and methods generic
+only over effects remain callable through `dyn`.
+
+**Alternatives weighed.** Row-polymorphic effect types with full inference
+(Koka), which are more expressive but produce signatures most systems
+programmers would find hard to read; checking effects only after
+monomorphisation (C++-template style), which reports errors at use sites
+rather than definitions; no polymorphism (every generic function is `may
+any`), which would make the feature useless for libraries.
+
+**Why.** Systems libraries are full of generic containers and callbacks, and
+their costs genuinely depend on their arguments: `Vec[T, A].push` allocates
+only if `A` does. Type terms express "whatever my parameters cost" in one
+word, which keeps common signatures short (`may T | panic`). Associated
+effects reuse a concept Rust programmers already know from associated types.
+Erasure keeps the feature free at run time (D2.1) and avoids code-size
+growth. The coarse meaning of `T` (all of its bounds' effects, plus drop)
+loses precision in rare cases, where `T.Name` is available.
+
+---
+
+## D31. Effect syntax: `may e1 | e2`
+
+**Chosen.** Effects are written after the keyword `may`, joined with `|`:
+`may alloc | panic`. `may none` is the empty set and `may any` the set of all
+effects. The same form is used in function declarations, function types,
+trait bounds, `dyn` types and `unsafe may` blocks. `may` is a contextual
+keyword.
+
+**Alternatives weighed.** Comma-separated lists (`may alloc, panic`), which are
+ambiguous inside generic argument lists and bounds; `+`, which is ambiguous
+with trait bounds; braces (`{alloc, panic}`), which collide with blocks;
+`effects(...)`, `uses ...`, `throws`-like keywords.
+
+**Why.** `|` cannot appear in a type, so an effect clause ends unambiguously
+wherever it is embedded (`Box[dyn Write may sys | block]`, `T: Iterator may
+none + Clone`), which keeps the grammar context-free (D2.5). Reading "may
+alloc or panic" is accurate: the function may do any subset. `may` reads as
+English and states permission, not obligation.
+
+---
+
+## D32. Allocators are type parameters; `alloc` means the global heap
+
+**Chosen.** The `alloc` effect means "uses the program's global allocator".
+Allocating library types take their allocator as a type parameter with a
+default (`Vec[T, A: Allocator = Global]`), store it, and use it for every
+operation; the effects of an allocating operation are those of the
+allocator's impl (`Global`'s are `alloc`, an arena's may be `none`). The
+global allocator is chosen once per program.
+
+**Alternatives weighed.** An implicit allocator in a dynamically scoped
+context, installed with something like `with alloc = arena { ... }` (Odin's
+context, effect handlers); Zig's explicit allocator arguments on every call;
+a single global allocator only (Rust stable, C).
+
+**Why.** The context approach was the first design tried, because it makes
+every library allocator-agnostic for free. It fails on soundness of the
+effect guarantee: a collection created under one allocator and grown or
+dropped under another would allocate from the wrong one, so code that the
+checker proved allocation-free could still call `malloc`. Storing the
+allocator in the value's type keeps the effect exact (the effect checker knows
+which allocator every operation uses), keeps memory safety (a collection
+borrowing an arena is a view type that cannot outlive it), and costs nothing
+at run time for zero-sized allocators like `Global`. The loss is that
+libraries must be generic over `A` to be allocator-agnostic, which is the
+same situation as Rust's allocator API.
+
+---
+
+## D33. Stack bounds are computed at link time over the whole program
+
+**Chosen.** After code generation, the toolchain computes for every function
+in the linked program its worst-case stack usage from the actual frame sizes
+and the call graph of the generated code. Indirect calls are bounded by every
+function of matching type whose address the program takes; `dyn` calls by
+every implementation the program converts to that trait object; foreign
+functions by their declared `@stack_bound`. A cycle in the call graph is
+bounded only if it passes through a function with `@recursion_limit(N)`,
+which the program enforces at run time by panicking on the (N+1)th nested
+activation. Programs can assert bounds (`@stack_limit`) and read them
+(`stack.bound(f)`), as link-time constants.
+
+**Alternatives weighed.** Bounds in source signatures (not portable across
+targets or optimisation levels); compile-time estimates before optimisation
+(unsound after inlining and register allocation); external analysis tools
+only (not part of the language, so the program cannot rely on the result,
+and the standard library cannot use it to size stacks); forbidding recursion
+(too restrictive for parsers and tree code).
+
+**Why.** Only the generated code knows the real frame sizes, and only the
+linker sees the whole program, which is required to bound indirect calls
+soundly. Making the result a link-time constant lets the program use it
+(exact fiber stacks, D34) and lets the build fail when an interrupt handler
+grows past its stack. Runtime-enforced recursion limits turn the one
+unboundable construct into a bounded one at the cost of a counter and a
+possible panic. The cost of this decision is that the stack half of a cost
+error appears only at link time, that bounds are conservative where function
+pointers are used widely, and that dynamically loaded code is unbounded
+unless it carries bound metadata.
