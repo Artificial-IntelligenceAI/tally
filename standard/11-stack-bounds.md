@@ -13,7 +13,9 @@ the largest amount, in bytes, by which the instance's own instructions move
 the stack pointer below its value at the call instruction that entered the
 instance, including the return address or link register save, saved
 registers, local storage, spill slots, outgoing argument areas, alignment
-padding, and any red zone it uses, but excluding what its callees use. Code
+padding (including the worst case of any dynamic realignment of the stack
+pointer for over-aligned locals), and any red zone it uses, but excluding
+what its callees use. Code
 inlined into an instance is part of that instance's frame. Frame sizes are
 implementation-defined, and must be the same in every build with the same
 compiler version, target, profile and source.
@@ -26,9 +28,11 @@ fn mid() -> u64 { let a: [256]u8 = [0; 256]; leaf(a.len() as u64) }   // frame â
 
 **11.1.2** A Tally program never adjusts its stack by an amount determined at
 run time: there are no variable-length arrays or `alloca`. An implementation
-must not generate code whose stack usage depends on run-time values, except
-for the runtime's context switches (15.4.3), which it accounts for under
-11.5.2.
+must not generate code whose stack usage depends on run-time values. The
+context switch `core.context.switch` (19.16.2) is a call-graph node whose
+frame size the implementation declares, like a foreign function with
+`@stack_bound`; every function that can suspend a fiber reaches it, so its
+use of the fiber's stack is part of their bounds (15.4.3).
 
 ```tally
 fn f(n: usize) { let a: [n]u8 = ...; }    // error: array length must be a constant (4.7.1)
@@ -44,17 +48,21 @@ wide division, stack probing), and a node for every foreign function the
 program calls. It has these edges:
 
 1. a *direct edge* from `f` to `g` for every call instruction in `f`'s
-   generated code whose target is `g`;
+   generated code whose target is `g`, and for every jump to the entry of
+   `g` (a tail call);
 2. an *indirect edge* from `f` to every *address-taken* function `g` whose
    type is compatible with a function pointer type through which `f` makes a
    call; a function is address-taken if it is coerced to a function pointer
    anywhere in the program (including capture-free closures), or is exported
-   (14.3.1); compatible means equal parameter types, return type, calling
-   convention and `unsafe`-ness, ignoring effects;
+   (14.3.1); compatible means equal parameter and return types after erasing
+   regions and effects, and equal calling convention, where a safe function
+   is compatible with both safe and `unsafe` pointer types;
 3. a *dynamic edge* from `f` to the implementation of method `m` for every
-   type `U` that the program coerces to `dyn Tr` (with any bindings), for
-   every call of `m` through a `dyn Tr` in `f`, and to `U`'s drop glue for
-   every drop of a `dyn Tr` owner in `f`.
+   type `U` that the program, in any instance, coerces to `dyn Tr` or to
+   `dyn Sub` for a trait `Sub` with supertrait `Tr` (with any bindings), for
+   every call of `m` through such a `dyn` value in `f`, and to `U`'s drop glue
+   for every drop of an owner of such a `dyn` value in `f`. (There is no
+   coercion from one `dyn` type to another.)
 
 ```tally
 fn a() {} fn b() { big_stack(); }
@@ -63,12 +71,12 @@ table[i]();                           // indirect edges to a, b, and every other
 ```
 *From: D33.*
 
-**11.2.2** A call to a foreign function, or an indirect call through an
-`extern "C"` function pointer type, has a bound only if the foreign function's
-declaration has the attribute `@stack_bound(N)` (14.1.5): the callee then has
-frame size N and no outgoing edges. Otherwise the callee is `unbounded`.
-Indirect calls through `extern "C"` function pointer types are always
-`unbounded`, because their targets may be foreign.
+**11.2.2** A direct call to a foreign function is bounded only if the
+function's declaration has the attribute `@stack_bound(N)` (14.1.5): the
+callee then has frame size N and no outgoing edges. Otherwise the callee is
+`unbounded`. Every indirect call through a function pointer type with an
+`extern` ABI (`"C"`, `"system"` or any other) is `unbounded`, because its
+targets may be foreign.
 
 ```tally
 extern "C" {
@@ -144,7 +152,9 @@ progress at once on one execution context's stack (15.1.1). Entering `f`
 when N activations are already in progress on the current execution context
 panics before `f`'s body begins. A function with `@recursion_limit` must
 include `panic` in its effect set. Activations entered through any route
-(direct, indirect, `dyn`) count.
+(direct, indirect, `dyn`) count. Each instance of a generic function has its
+own counter, with the same N. A function with `@recursion_limit` is never
+inlined, so that it remains a node of the call graph.
 
 ```tally
 @recursion_limit(32)
@@ -170,9 +180,11 @@ comparison and one decrement per activation of `f`.
 
 ## 11.5 Using bounds in programs
 
-**11.5.1** `@stack_limit(N)` on a function asserts that its bound is not
-`unbounded` and is at most N bytes. The assertion is checked when a program
-containing the function is linked, for that program's target and profile;
+**11.5.1** `@stack_limit(N)` on a function asserts that its bound (the value
+of 11.3.2, without `CALL_OVERHEAD`) is not `unbounded` and is at most N
+bytes. The assertion is checked when a program containing the function is
+linked, for that program's target and profile, for every instance of a
+generic function, and also for functions that nothing in the program calls;
 a violation is an error. The diagnostic must give the computed bound (or the
 reason it is unbounded) and a deepest path through the call graph.
 
@@ -187,15 +199,17 @@ fn on_packet(p: &Packet) may none { route(p); }
 **11.5.2** The library function `core.stack.bound(f) -> ?usize` (19.16.1)
 returns the bound of calling `f`, where `f` is a function item, a closure, or a
 function pointer (for which the bound is that of an indirect call through its
-type), plus the runtime overhead constant `core.stack.CALL_OVERHEAD`, or
-`.None` if unbounded. `core.stack.bound_required(f) -> usize` is the same but
+type), plus `core.stack.CALL_OVERHEAD`, the frame of the runtime's entry
+trampoline that calls a context's entry function; or `.None` if unbounded.
+Passing a value whose type is not callable is an error. `core.stack.bound_required(f) -> usize` is the same but
 makes linking fail if the bound is `unbounded`. Their results are link-time
 constants: they may be used at run time but not in compile-time evaluation
 (16.1).
 
 ```tally
-let need = stack.bound_required(&handle_conn);       // e.g. 3104 on this target
-let fib = fiber.spawn_sized(need, move || handle_conn(c))?;
+let job = move |_| handle_conn(c);
+let need = stack.bound_required(&job);                 // e.g. 3104 on this target
+let fib = scope.spawn_sized(need + stack.CONTEXT_OVERHEAD, job)?;
 ```
 *From: D33, D34.*
 
@@ -205,8 +219,8 @@ that of the instance `F.call_once` in the program being linked.
 
 ```tally
 // in std.fiber (20.8.2):
-pub fn spawn[F: FnOnce() may block | sys | panic | alloc](s: &Scope, f: F) -> Fiber ! SpawnError may alloc {
-    let size = stack.bound_required(&f);    // bound of F.call_once in this program
+pub fn spawn[T: Static, G: FnOnce(&Scope[E]) -> T + Static](&self, g: G) -> Fiber[T] ! SpawnError from self may alloc | sys | G {
+    let size = stack.bound_required(&g) + stack.CONTEXT_OVERHEAD;   // bound of G.call_once in this program
     ...
 }
 ```
@@ -240,18 +254,24 @@ fn deep(n: u64) -> u64 may panic { if n == 0 { 0 } else { 1 + deep(n - 1) } }
 **11.6.3** Asynchronous signal handlers installed through `std` run on a
 separate per-thread signal stack (20.9.2), so they do not consume the
 interrupted context's stack. On targets where interrupt handlers run on the
-interrupted stack (17.4), the program must reserve space for them; the bound
-of each handler is available through `core.stack.bound` for that purpose.
+interrupted stack (17.4), the toolchain computes at link time
+`core.stack.INTERRUPT_RESERVE`: the sum, over the target's interrupt priority
+levels, of the largest bound among the handlers at that level plus the size
+of the exception frame the hardware pushes (`unbounded` if any handler is).
+On such targets `CONTEXT_OVERHEAD` includes `INTERRUPT_RESERVE`, so exactly
+sized fiber and thread stacks remain safe, and the implementation's start-up
+code checks at link time that the main stack area is at least
+`bound(@entry function) + INTERRUPT_RESERVE`.
 
 ```tally
-const IRQ_RESERVE: usize = 1024;
 @stack_limit(1024) @interrupt("UART0") fn uart() may sys { ... }
-// main stack size chosen as stack.bound_required(main_loop) + IRQ_RESERVE
+// linker script reserves STACK_SIZE; link fails if
+//   STACK_SIZE < stack.bound(reset) + stack.INTERRUPT_RESERVE
 ```
 *From: D33.*
 
-**11.6.4** Calling, through a Tally function pointer or `dyn` value, code that
-is not part of the program's call graph (for example a pointer obtained from
+**11.6.4** Calling, through a function pointer with the Tally calling
+convention or a `dyn` value, code that is not part of the program's call graph (for example a pointer obtained from
 foreign code by transmutation) is undefined behaviour, because bounds that the
 program relies on may be wrong.
 

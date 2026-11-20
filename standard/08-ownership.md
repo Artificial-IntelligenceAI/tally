@@ -24,7 +24,9 @@ place's type is not `Copy`. A value may be moved out only of a whole local
 binding, parameter or temporary. Moving out of a field, an element, a
 dereference (`*r`, `*b` for a `Box`, `*p` for a raw pointer) or a `static` is
 an error; use `mem.replace`, `mem.take`, `Box.into_inner` or pattern
-destructuring of the whole owner instead.
+destructuring of the whole owner instead. When a pattern moves the owner, the
+parts that no binding takes are dropped at the end of the pattern's full
+expression (for a `match`, when the arm's body ends), in declaration order.
 
 ```tally
 let p = Pair { a: String.new(), b: String.new() };
@@ -86,7 +88,7 @@ for line in lines {
     buf.push(line)?;
     send(buf);               // error: buf moved in a previous iteration
 }
-for line in lines {
+for line in more_lines {
     send(buf);
     buf = Vec.new();         // fine: re-initialised before next iteration
 }
@@ -99,8 +101,9 @@ for line in lines {
 from its declaration to that point it has been assigned and not moved since.
 Every use of a binding must be at a point where it is definitely initialised.
 A `let` binding declared without an initialiser may be assigned only at points
-where it is definitely *un*initialised (it is assigned at most once on every
-path).
+where it is *definitely unassigned*: no path from its declaration to that
+point assigns it (it is assigned at most once on every path, and a moved
+`let` binding can never be assigned again).
 
 ```tally
 let x: u32;
@@ -148,7 +151,7 @@ let n = make_list().len();      // temporary holds the list during len()
 **8.4.2** A temporary is dropped at the end of the *full expression* that
 created it, in reverse order of creation. The full expressions are: an
 expression statement; the initialiser of a `let` or `var` (the whole
-statement, including `else`); the right side of an assignment (with the
+statement, including `else`); a `match` guard; the right side of an assignment (with the
 whole statement); the tail expression of a block (dropped after the tail value
 has been computed, before the block's bindings are dropped); an `if` or
 `while` condition (dropped before the block runs); a `return`, `break` or
@@ -185,7 +188,7 @@ match lock.guard().state {      // the guard lives until the end of the match
    fields of an enum's active variant in declaration order; tuple elements and
    array elements from first to last; for `Box[U, A]`, the boxed `U` and then
    its memory is returned to `A`; for a closure, its by-value captures in the
-   order they were captured.
+   order in which their bindings are first mentioned in the closure body.
 
 References, raw pointers, function pointers, unions and `Copy` types have no
 drop glue. Library types built on raw pointers (such as `Vec`) drop their
@@ -233,9 +236,9 @@ dropped (scope end, assignment over an initialised place, `_ = e`, temporaries)
 contributes the drop effects of its type to the enclosing function.
 
 ```tally
-fn f() may sys | alloc {
+fn f() may sys | block | alloc {
     let file = File.open("x") orelse return;   // File.Drop = sys
     let v: Vec[u8] = Vec.new();                 // Vec[u8, Global].Drop = alloc
-}   // both dropped here: contributes sys | alloc
+}   // both dropped here: contributes sys | alloc (open contributed block)
 ```
 *From: D3, D25, D28.*

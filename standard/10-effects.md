@@ -88,14 +88,16 @@ fn f[T: Iterator + Clone, effect E](t: T, g: fn() may E) may T.Next | E | panic 
 *From: D30, D31.*
 
 **10.2.4** The *type effects* of a type `X` with respect to a set of bounds
-`B` (the bounds that a type parameter was declared with, where `X` was
-substituted for it) are the union of: for each trait in `B` and each of its
-supertraits, every associated effect of `X`'s impl of that trait; and the
-drop effects of `X` (10.3.3). For a type parameter `T` that has not been
+`B` (the bounds on the type parameter that `X` was substituted for: those in
+its declaration, those of every `where` predicate whose subject is that
+parameter, and their supertraits) are the union of: for each trait in `B`,
+every associated effect of `X`'s impl of that trait; and the drop effects of
+`X` (10.3.3). The drop effects of `X`'s associated types are not included;
+they have their own terms (10.2.3). For a type parameter `T` that has not been
 substituted, the type effects are the symbolic term `T`.
 
 ```tally
-fn g[T: Clone](x: &T) -> T may T { x.clone() }
+fn g[T: Clone](x: &T) -> T ! AllocError may T { x.clone() }
 // g[String]: T = String.Clone ∪ drop(String) = alloc ∪ alloc = alloc
 // g[u32]: none
 ```
@@ -103,11 +105,13 @@ fn g[T: Clone](x: &T) -> T may T { x.clone() }
 
 **10.2.5** The *normal form* of an effect set is a set of concrete effects
 (built-in and user) plus a set of symbolic terms (effect parameters, type
-parameters, associated effects of type parameters), or `any`. `any` absorbs
-everything. An effect set E1 is *within* E2 (E1 ⊆ E2) if E2 is `any`, or every
-concrete effect of E1 is in E2 and every symbolic term of E1 is *covered* by
-E2. A term is covered if it occurs in E2; or it is `T.Name` and `T` occurs in
-E2; or a bound in scope limits it (10.5.3) to a set within E2.
+parameters, associated effects of type parameters, and associated types of
+type parameters), or `any`. `any` absorbs everything. An effect set E1 is
+*within* E2 (E1 ⊆ E2) if E2 is `any`, or every concrete effect of E1 is in E2
+and every symbolic term of E1 is *covered* by E2. A term is covered if it
+occurs in E2; or it is `T.Name` for an associated *effect* `Name` and `T`
+occurs in E2; or a bound in scope limits it (10.5.3) to a set within E2. A
+term `T.Name` for an associated *type* is not covered by `T`.
 
 ```tally
 fn h[T: Iterator may sys](t: T) may sys | panic { for x in t { ... } }
@@ -140,8 +144,11 @@ fn f() -> u32 may panic {
 * calling a trait method through a bound on a type parameter `T` contributes
   the trait method's declared set with `Self` replaced by `T`;
 * calling a function pointer contributes the effect set in its type;
-* calling a method on a `dyn` value contributes the binding (or `may` bound)
-  for the method's associated effects (7.8.2);
+* calling a method `m` through `dyn Tr[bindings] may E` contributes `m`'s
+  declared clause, with each `Self.Name` replaced by its binding (or by `E`
+  if unbound), the term `Self` replaced by `E`, and `m`'s effect parameters
+  replaced by their arguments; calling a `Box[dyn FnOnce(..) may E, A]`
+  contributes `E` and the effects of `A` (the box is freed);
 * calling a value of generic type `F` through `Fn`/`FnMut`/`FnOnce`
   contributes `F.Call`;
 * calling a closure directly contributes the closure's effect set;
@@ -157,7 +164,8 @@ fn run(cb: fn() may sys) may sys { cb(); }
 **10.3.3** A *drop* (8.5.4) of a value of type `X` contributes the *drop
 effects* of `X`: the union, over every `Drop` impl in `X`'s drop glue (8.5.1),
 of that impl's `Drop` associated effect, instantiated. For a type parameter
-`T`, dropping a `T` contributes the term `T`. Drop points include scope ends,
+`T`, dropping a `T` contributes the term `T`; dropping a value of an
+associated type `T.Item` contributes the term `T.Item`. Drop points include scope ends,
 assignments over initialised places, `_ = e`, the end of a temporary, moving
 a value into a function that drops it (the callee's effects cover that), and
 the drop of an iterator after `for`.
@@ -184,8 +192,10 @@ fn mmio(p: *u32) -> u32 may sys { unsafe { p.read_volatile() } }   // volatile a
 
 **10.3.5** A closure expression contributes nothing when it is evaluated;
 the closure's own effect set is the effect set of its `Call` associated
-effect, which is its declared `may` clause, or else its body effects. Dropping
-a closure value contributes the drop effects of its by-value captures.
+effect, which is its declared `may` clause, or else its body effects together
+with the drop effects of its by-value captures (which `call_once` drops when
+the body leaves them unused). Dropping a closure value contributes the drop
+effects of its by-value captures.
 
 ```tally
 let f = || alloc_thing();     // creating f: no effect
@@ -269,10 +279,13 @@ fn b(n: u32) -> u32 { a(n - 1) }      // inferred: a = b = {panic} (from `n - 1`
 *From: D29.*
 
 **10.4.5** An associated effect of a trait impl may be omitted only if the
-trait declares a default for it (which is then used) or the impl is not
-visible outside its package (the trait or the implemented type is
-package-visible); in the latter case it is inferred as the smallest set that
-makes every method of the impl satisfy the trait's declarations.
+impl is not visible outside its package (the trait or the implemented type is
+package-visible), in which case it is inferred as the smallest set that makes
+every method of the impl satisfy the trait's declarations, or if the trait
+declares a default for it, which is then used (for a package-visible impl,
+inference takes precedence over the default). Outside its package, a trait
+impl method that has no declared clause is seen with the trait's clause
+instantiated with the impl's bindings, never with its inferred set.
 
 ```tally
 struct Lines { ... }              // package-visible
@@ -313,15 +326,18 @@ fn quiet_iter[I: Iterator[Next = none]](it: I) may I { ... }   // next is effect
 *From: D30.*
 
 **10.5.3** A bound `T: Tr may E` requires every associated effect of `T`'s
-impl of `Tr` and its supertraits, and the drop effects of `T`, to be within
-`E`. Inside the scope of the bound, the terms `T.Name` (for those effects) and
-`T`'s drop effects are known to be within `E` when checking (10.2.5). A bound
-`T: Tr[Name = E1]` makes `T.Name` within `E1`.
+impl of `Tr` and its supertraits, the drop effects of `T`, and the type
+effects of each of that impl's associated types, to be within `E`. Inside the
+scope of the bound, the terms `T.Name` (for those associated effects and
+types) and `T` are known to be within `E` when checking (10.2.5). A bound
+`T: Tr[Name = E1]` makes `T.Name` within `E1` for an associated effect; a
+bound `T: Tr[Item = X]` replaces the term `T.Item` by the type effects of
+`X`.
 
 ```tally
 fn drain[T: Iterator may none](var it: T) -> u32 may panic {
     var n: u32 = 0;
-    while let .Some(_) = it.next() { n += 1; }     // next: within none
+    while let .Some(_) = it.next() { n += 1; }     // next and dropping items: within none
     n                                              // drop of `it`: within none
 }
 ```
@@ -330,7 +346,13 @@ fn drain[T: Iterator may none](var it: T) -> u32 may panic {
 **10.5.4** Effect parameters (`effect E`) range over effect sets. They may be
 used in `may` clauses and in effect positions of types (function pointer
 types, `dyn` bindings, generic arguments to other effect parameters). They are
-inferred at uses like type parameters (4.13.4), or given explicitly. A method
+given explicitly or inferred at uses: an effect variable collects the
+constraints `X ⊆ variable` and `variable ⊆ Y` arising from subtyping and
+from `may` clauses, and takes the least set satisfying them (`none` if it is
+unconstrained); if no set satisfies them, the program has an error. An effect
+parameter of a type has a variance computed like a type parameter's (9.4.5);
+the effect set of a function pointer type or `dyn` type is a covariant
+position (a smaller set is a subtype, 4.11.3). A method
 whose only generic parameters are effect parameters is still object-safe
 (7.8.1). Effect parameters are erased: they never create separate instances
 (7.10.1).
@@ -344,13 +366,15 @@ let d: &dyn Display = &x;     // fine: fmt is generic only over an effect
 
 **10.5.5** When a generic function is instantiated, its effect set is
 obtained by substituting: each type term `T` by the type effects of the
-argument type with respect to `T`'s declared bounds (10.2.4); each `T.Name`
-by the argument's impl binding; each effect parameter by its argument. The
+argument type with respect to `T`'s bounds (10.2.4); each `T.Name` for an
+associated effect by the argument's impl binding; each `T.Name` for an
+associated type by the type effects of the type the impl binds it to; each
+effect parameter by its argument. The
 result is used as the call's contribution (10.3.2). If a generic body is
 correct, every instance is correct: no instance needs re-checking.
 
 ```tally
-pub fn push[T, A: Allocator](v: &mut Vec[T, A], x: T) ! AllocError may A { ... }
+pub fn push[T, A: Allocator](v: &mut Vec[T, A], x: T) ! AllocError may A | T { ... }
 push(&mut global_vec, 1)?;   // may alloc
 push(&mut arena_vec, 1)?;    // may none, if the arena's allocator is effect-free
 ```
@@ -390,7 +414,14 @@ where performing an effect means reaching one of its *primitive sources*:
 * for `sys`, a volatile memory access, an `asm` declared `may sys`, or a call
   to a foreign function declared `may sys`.
 
-The guarantee holds provided that every `unsafe may` block in the execution
+Whatever happens during a call to the global allocator's methods counts only
+as `alloc`, and whatever happens after panic handling has started (the panic
+handler's own work) counts only as `panic`: those are part of what the two
+effects mean. A stack overflow in an execution context whose stack is not
+exactly sized (11.6.2) is not an effect: it can end any function, and is
+excluded from the guarantee; a function that must not be ended this way runs
+in a context sized by its bound, or carries `@stack_limit`. The guarantee
+holds provided that every `unsafe may` block in the execution
 is truthful, every foreign declaration's `may` clause is truthful, and the
 program has no undefined behaviour.
 

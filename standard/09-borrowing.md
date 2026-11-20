@@ -60,7 +60,10 @@ borrowing purposes, whatever the index values; subslicing `[a..b]` is an
 index projection. Two places *overlap* if one is a prefix of the other, or if
 they differ first at index projections; places that differ first at two
 different fields of a struct or tuple are *disjoint*. Places that differ
-first at fields of a union overlap.
+first at fields of a union overlap. Matching an enum value against a variant
+pattern uses a *downcast* projection `(p as V)` before the field projection;
+places that differ first at downcasts to two different variants are disjoint,
+and a downcast place overlaps `p` itself.
 
 ```tally
 let a = &mut p.x;
@@ -77,7 +80,11 @@ let (l, r) = v.split_at_mut(1);   // the library method gives two disjoint slice
 place, the kind (*shared* or *exclusive*), and a region (9.4.1), at the point
 where the borrow is created. Each reborrow through a reference, such as
 `&*r` or `&mut (*r).f`, also creates a loan of its place (which starts with
-`*r`).
+`*r`). A pattern binding in mode *ref* or *ref mut* (6.3.1) creates a shared
+or exclusive loan of the matched place at the point of binding. While a match
+guard is evaluated, the arm's bindings are shared loans of their places (so a
+guard cannot modify or move the scrutinee); bindings by move happen only after
+the guard succeeds.
 
 ```tally
 let r = &mut s;            // loan L1: (s, exclusive, ρ1)
@@ -87,9 +94,11 @@ let q = &(*r).name;        // loan L2: ((*r).name, shared, ρ2)
 
 **9.3.2** A loan L is *in scope* at a point P if there is a path in the CFG
 from L's creation point to P such that every point on the path after the
-creation point belongs to L's region, and no point on the path assigns to a
-local `x` such that L's place begins with `*x` (assigning a new reference to
-`x` ends loans made through the old one).
+creation point belongs to L's region, and no point strictly before P on the
+path assigns to a place `q` of reference type such that L's place extends `q`
+through a dereference of `q` (assigning a new reference to `q` ends loans made
+through the old one). Assignments over an initialised place are lowered as a
+drop of the place followed by a store, at two points.
 
 ```tally
 var r = &a;
@@ -106,6 +115,12 @@ comparing), *write* (assignment, exclusive borrow), *move*, *drop*, and
 
 * the loan is exclusive (any access conflicts), or
 * the loan is shared and the access is anything other than a read.
+
+An assignment (store) to a place `q` is a *shallow write*: it overlaps loans
+of `q`, of prefixes of `q`, and of places extending `q` that do not pass
+through a dereference of a reference; it does not overlap loans of places
+that extend `q` through a dereference of a reference (those are ended
+instead, 9.3.2).
 
 A storage-dead or drop of a local `x` conflicts with every loan whose place
 begins with `x` and does not pass through a dereference of a shared or
@@ -194,7 +209,8 @@ for each elided region in each parameter type (each `&`, each view type
 occurrence, each region inside a generic argument, written or implied, in
 the order they appear); in a method of an `impl` whose implemented type
 contains regions, those regions (*impl regions*); and one region `ret` for all
-elided regions in the return type. The *known relations* are: `static` outlives
+elided regions in the return type. The *known relations* (closed under
+transitivity) are: `static` outlives
 every region; every region outlives itself; for a parameter type `&ρ1 T` where
 `T` contains region ρ2, ρ2 outlives ρ1 (well-formedness); every region of a
 type parameter bounded by `Static`, and every region of a type argument known
@@ -293,7 +309,11 @@ is an impl region (9.4.3). An associated type defined in such an impl may
 mention references; those carry the impl region. A method can return data
 of the impl region by naming `*self` (or `self` for a by-value receiver) in
 its `from` clause, or by returning an associated type that carries the impl
-region.
+region; when checking such a method against the trait, `Self.Item` in the
+trait's signature has the impl region. In an impl for a type that is not a
+view type, a reference in an associated type is an error unless its region
+is `static` (for example `type Item = &str` naming string literals only is
+still an error; write a view type instead).
 
 ```tally
 view struct Iter[T] { rest: &[]T }
@@ -358,7 +378,12 @@ every choice of them. Accordingly, a closure body is checked with the elided
 regions of its parameter types (and the `ret` region of its return type, with
 `from` defaulting to all its parameters) as universal regions of its own,
 with only the known relations of 9.4.3; the regions of its captured places
-are region variables of the enclosing function, solved together with it.
+are region variables of the enclosing function, solved together with it. A
+constraint `ρ : σ` where σ is a universal region of a closure (its parameter
+or `ret` region) and ρ is a region of the enclosing function cannot be
+satisfied by inference inside the enclosing function, since σ may be chosen
+arbitrarily long by whoever calls the closure: it is satisfied only if ρ is
+`static`.
 Regions that a bound's parameter types contain through type arguments (for
 example the regions of `E` in `FnOnce(&Scope[E])`) are not elided and are not
 higher-ranked.
@@ -367,8 +392,10 @@ higher-ranked.
 fn apply[F: Fn(&u32) -> &u32](f: F) -> u32 { let x = 7; *f(&x) }
 let k = 5;
 apply(|r| r);        // fine: returns its argument (from the parameter)
-apply(|r| &k);       // fine: k outlives every region of the call
-let g = |r: &u32| { SAVED = r; };   // error: r's region is higher-ranked and need not be static
+apply(|r| &k);       // error: the result must outlive any region the caller picks; k is not static
+static K: u32 = 5;
+apply(|r| &K);       // fine: K is static
+let g = |r: &u32| unsafe { SAVED = r; };   // error: r's region is higher-ranked and need not be static
 ```
 *From: D24, D66.*
 
@@ -377,7 +404,8 @@ let g = |r: &u32| { SAVED = r; };   // error: r's region is higher-ranked and ne
 **9.6.1** The drop glue of type `T` *uses* region ρ if `T`'s glue includes a
 `Drop.drop` call for a type `U` in which ρ occurs, other than solely within
 type arguments for which `U`'s `Drop` impl is marked `@drop_ignores(T)`
-(16.3.1). Dropping a value whose type has no `Drop` impl in its glue uses no
+(16.3.1); and, in that excepted case, it still uses ρ if the drop glue of
+the type argument itself uses ρ (the ignored elements are still dropped). Dropping a value whose type has no `Drop` impl in its glue uses no
 regions.
 
 ```tally
@@ -409,8 +437,9 @@ unsafe impl[T, A: Allocator] Drop for Vec[T, A] {
 
 **9.7.1** String literals, byte string literals, references to statics, and
 references to constant values promoted to static storage have region
-`static`. A reference to a constant expression `&C` where `C` is a constant
-of a type with no interior mutability and no drop glue is *promoted*: the
+`static`. A shared reference to a constant expression `&C` (never `&mut C`)
+where `C` is of a type with no interior mutability and no drop glue is
+*promoted*: the
 value is placed in static storage and the reference has region `static`.
 
 ```tally

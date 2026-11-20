@@ -1112,8 +1112,10 @@ io.println("addr=0x", fmt.zero_pad(fmt.hex(addr), 16), " t=", fmt.fixed(secs, 3)
 ```tally
 pub fn bound[F: ?Sized](f: &F) -> ?usize;            // 11.5.2; F: a function item, closure or fn pointer type
 pub fn bound_required[F: ?Sized](f: &F) -> usize;    // link error if unbounded
-pub const CALL_OVERHEAD: usize;                      // target-defined bytes added to every bound
-pub const CONTEXT_OVERHEAD: usize;                   // link-time: per-context control block and switch frame
+pub const CALL_OVERHEAD: usize;      // target-defined: frame of the runtime entry trampoline (11.5.2)
+pub const CONTEXT_OVERHEAD: usize;   // link-time: control block, context-local statics, CALL_OVERHEAD,
+                                     // and INTERRUPT_RESERVE on targets that need it
+pub const INTERRUPT_RESERVE: usize;  // link-time (11.6.3); 0 on targets whose interrupts use their own stack
 pub fn remaining() -> usize may sys;                 // bytes left on the current context's stack, rounded down to 16
 ```
 
@@ -1155,8 +1157,9 @@ pub unsafe fn set_waiter(w: ?&dyn Waiter);
 ```
 
 `core.time.Instant` is the monotonic clock instant type that `std.time`
-re-exports (20.6.1); in `core` it has no `now`. `switch` uses at most a target-defined number of bytes of
-`from`'s stack, which is included in `CONTEXT_OVERHEAD`.
+re-exports (20.6.1); in `core` it has no `now`. `switch` is a call-graph node with an implementation-declared frame size
+(11.1.2), so the stack it uses on the suspended context is part of the bound
+of every function that reaches it.
 
 ```tally
 // inside a waiting primitive (20.1.3):

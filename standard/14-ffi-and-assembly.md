@@ -26,10 +26,10 @@ Tally name, or the string given by `@link_name("sym")`.
 
 ```tally
 extern "C" {
-    fn printf(fmt: *u8, ...) -> i32 may sys | block;
+    fn printf(fmt: *c_char, ...) -> c_int may sys | block;
     @link_name("__errno_location") fn errno_ptr() -> *mut i32 may none;
 }
-unsafe { printf(c"%d items\n".as_ptr(), 3 as i32); }
+unsafe { printf(c"%d items\n".as_ptr(), 3 as c_int); }
 ```
 *From: D38.*
 
@@ -99,9 +99,12 @@ unsafe { puts(s.as_ptr()); }
 
 ## 14.3 Exporting functions
 
-**14.3.1** `@export` on a public function with an `extern "C"` (or other
-foreign) ABI gives it external linkage under its own name, or the name given
-by `@export("sym")`, so that foreign code or a linker script can refer to it.
+**14.3.1** `@unsafe(export)` on a public function with an `extern "C"` (or
+other foreign) ABI gives it external linkage under its own name, or the name
+given by `@unsafe(export("sym"))`, so that foreign code or a linker script can
+refer to it. The attribute is unsafe (13.1.2) because an exported symbol can
+replace one that other code relies on (for example `malloc` or `memcpy`);
+the programmer promises that it does not.
 Its parameter and return types must be FFI-safe. An exported function's
 effect set and stack bound are computed as usual; its address counts as taken
 (11.2.1). If a panic occurs inside an exported function, the panic handler
@@ -109,7 +112,7 @@ runs as usual (12.4.1); it never returns, so no unwinding into foreign code can
 occur.
 
 ```tally
-@export("tally_crc32")
+@unsafe(export("tally_crc32"))
 pub extern "C" fn crc32(p: *u8, n: usize) -> u32 { unsafe { crc(slice.from_raw(p, n)) } }
 ```
 *From: D38, D21.*
@@ -139,7 +142,8 @@ AsmReg      = IDENT | STRING_LIT ;
 AsmValue    = Expr | "_" | Expr "=>" ( Expr | "_" ) ;
 ```
 
-The adjacent string literals are concatenated into the *template*. An `asm`
+The adjacent string literals are joined, with a line end between each pair,
+into the *template*. An `asm`
 expression is an unsafe operation. Its type is `()`, or `never` if it has the
 `noreturn` option.
 
@@ -150,19 +154,49 @@ let tsc = ((hi as u64) << 32) | lo as u64;
 ```
 *From: D39.*
 
-**14.4.2** Operands, register classes and template placeholders follow the
-semantics of Rust's `asm!` (as specified in the Rust Reference, inline
-assembly chapter, as of 2025): `in(R) e` passes the value of `e` in a register
-of class or name `R`; `out(R) p` writes the register to place `p` (or
-discards it for `_`) at the end; `lateout` may share a register with an input;
-`inout(R) p` reads and writes `p`, and `inout(R) e => p` reads `e` and writes
-`p`; `{0}`, `{1}` and `{name}` in the template are replaced by the operands'
-registers, with optional target-specific modifiers (`{0:e}`); `{{` and `}}`
-are literal braces. The register classes and modifiers for each target are
-implementation-defined and must be documented; on targets LLVM supports, they
-must at least include those Rust documents for that target. The options are
-`pure`, `nomem`, `readonly`, `preserves_flags`, `noreturn`, `nostack` and
-`att_syntax`, with Rust's meanings.
+**14.4.2** Operands. `R` is either a *register class* (an identifier) or an
+explicit register (a string such as `"eax"`). Every target provides at least
+the class `reg` (general-purpose registers able to hold a pointer-sized
+integer); other classes, the register names, and which types each class
+accepts are implementation-defined and documented per target. The value of
+an operand must have an integer, float, raw pointer or function pointer type
+that the class accepts.
+
+* `in(R) e` evaluates `e` and places its value in a register of `R` before
+  the assembly runs; the assembly must leave that register unchanged unless
+  the same register is also an output.
+* `out(R) p` makes the register's value after the assembly runs be stored
+  into the place `p` (or discarded for `_`); the register may be allocated to
+  the same register as an input only for `lateout`.
+* `lateout(R) p` is `out`, except that the register may share a register with
+  an input, so the assembly must read all inputs before writing it.
+* `inout(R) p` places the value of `p` in the register and stores the
+  register back into `p` afterwards; `inout(R) e => p` takes the input from
+  `e` and stores the output into `p` (or discards it for `_`);
+  `inlateout` is the same with the sharing rule of `lateout`.
+* `clobber_abi("C")` marks every register that the named calling convention
+  does not preserve as overwritten.
+
+Operands are evaluated left to right before the assembly runs; outputs are
+stored left to right after it. Every register the assembly writes, other than
+outputs, must be listed through `clobber_abi` or as an output to `_`. In the
+template, `{N}` is replaced by the register (or memory operand syntax, for
+targets that use it) of the N-th operand counting from 0, `{name}` by the
+operand named `name`, `{N:m}` and `{name:m}` apply the target-defined
+modifier `m` (for example a sub-register name), and `{{` and `}}` stand for
+literal braces.
+
+Options: `nomem` (the assembly neither reads nor writes memory that the
+program can observe); `readonly` (it does not write such memory); `pure` (it
+has no side effects and its outputs depend only on its inputs, so it may be
+removed or merged; requires `nomem` or `readonly`); `preserves_flags` (it does
+not change condition flags); `noreturn` (control never leaves it; the
+expression has type `never` and must have no outputs); `nostack` (14.4.4);
+`att_syntax` (x86 only: AT&T operand order). Without `nomem`/`readonly`, the
+assembly may read and write any memory reachable through pointers passed as
+inputs or exposed (13.4.1). The template's own syntax is that of the target's
+assembler. (These rules follow the design of Rust's `asm!`, from which the
+operand syntax was taken.)
 
 ```tally
 let x: u64 = 5;
@@ -180,8 +214,9 @@ unsafe { asm ("wfi"); }                  // default: may sys
 ```
 *From: D39, D3.*
 
-**14.4.4** The `stack N` clause states the maximum number of bytes the
-assembly moves the stack pointer below its value on entry to the assembly,
+**14.4.4** The `stack N` clause states the maximum number of bytes below the
+stack pointer's value on entry to the assembly that the assembly reaches,
+either by moving the stack pointer or by accessing memory below it,
 including anything it calls; it defaults to 0. It is added to the
 enclosing function's frame size (11.2.3). With the `nostack` option, the
 assembly must not use the stack at all (not even below the stack pointer),

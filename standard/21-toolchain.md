@@ -103,7 +103,7 @@ tally new blinky --bin
 **21.3.2** `tally build [--lib] [--bin NAME]... [--emit KIND]` builds the
 selected targets (default: all targets of the selected packages), fetching
 dependencies as needed. `--emit` selects, for the library target,
-`static-lib` or `shared-lib` (a C-callable library of the `@export`ed
+`static-lib` or `shared-lib` (a C-callable library of the exported
 functions, 17.2.1), and, for any target, additionally `asm` or `object`.
 Building a binary includes linking and therefore the stack-bound phase
 (chapter 11): all `@stack_limit` assertions and `bound_required` uses are

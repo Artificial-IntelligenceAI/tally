@@ -166,8 +166,9 @@ fn handle(c: &mut TcpStream) ! io.Error may sys | block | panic {
 *From: D34.*
 
 **15.4.3** The stack that a fiber uses while it is suspended and while a
-waiting primitive switches away is part of the bound of that primitive, and
-so of the fiber's entry function. The scheduler's own work happens on the
+waiting primitive switches away is part of the bound of that primitive (it
+reaches `core.context.switch`, 11.1.2), and so of the fiber's entry
+function. The scheduler's own work happens on the
 scheduler's stack, not on fiber stacks.
 
 ```tally

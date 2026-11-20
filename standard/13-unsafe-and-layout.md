@@ -28,9 +28,10 @@ pub unsafe fn sum_raw(p: *u32, n: usize) -> u64 may panic {
 5. an `asm` expression;
 6. an `unsafe may` block (which is itself an unsafe block).
 
-Implementing an `unsafe trait` requires `unsafe impl` (7.1.4), and
-`@drop_ignores` requires `unsafe impl` (9.6.2); these are the only unsafe
-declarations.
+Implementing an `unsafe trait` requires `unsafe impl` (7.1.4),
+`@drop_ignores` requires `unsafe impl` (9.6.2), and the unsafe attributes
+`@unsafe(export(...))` and `@unsafe(section(...))` (16.3.1) must be written in
+that form; these are the only unsafe declarations.
 
 ```tally
 let p: *mut u8 = buf.as_mut_ptr();
@@ -61,8 +62,12 @@ foreign code or a truthless `unsafe impl`).
    allow; foreign code performing undefined behaviour.
 7. Foreign code unwinding into, or `longjmp`-ing over, Tally frames.
 8. Executing `core.hint.unreachable_unchecked()` (19.18.3).
-9. Breaking the promise of `@drop_ignores` (9.6.2) or of an `unsafe impl` of
-   `Send` or `Sync` (15.2), or calling code outside the program's call graph
+9. Breaking the documented promise of `@drop_ignores` (9.6.2), of any
+   `unsafe impl` (including `Send`, `Sync`, `Allocator`, `GlobalAlloc` and
+   `Waiter`), or of an unsafe attribute (an exported symbol that replaces one
+   other code relies on; a section that makes code run implicitly); a false
+   `@stack_bound` on a foreign function that an exactly sized execution
+   context calls (14.1.5); or calling code outside the program's call graph
    through a Tally function pointer (11.6.4).
 10. Inline assembly that violates its operands, options, declared stack use,
     or the target's ABI rules for inline assembly (14.4).
@@ -124,9 +129,12 @@ struct Hdr { tag: u8, len: u32, flags: u16 }
 its natural alignment; on a field, it raises that field's alignment to at
 least N. N must be a power of two. `@packed` on a struct sets every field's
 alignment to 1 for layout purposes, so fields are placed at consecutive byte
-offsets and the struct has alignment 1 (unless `@align` is also given). Taking
-a reference to a field of a `@packed` struct whose type's natural alignment
-exceeds 1 is an error; such fields are read and written by copying.
+offsets and the struct has alignment 1 (unless `@align` is also given). Any
+borrow, explicit or implicit (a `&`/`&mut` expression, an auto-referenced
+method receiver, a binding in *ref* mode, a closure capture by reference), of
+a place whose path passes through a field of a `@packed` struct is an error
+unless the borrowed place's type has alignment 1; such fields are read and
+written by copying.
 
 ```tally
 @packed struct Wire { kind: u8, len: u32 }      // size 5, len at offset 1
@@ -143,7 +151,7 @@ enums with a declared tag type and only unit variants (occupying the tag
 type's width), or other `@bitpacked` structs (occupying their backing width).
 The field widths must add up to exactly N. The struct has the size, alignment
 and byte order of `uN`. Fields are read and written by shifting and masking;
-references to fields are an error. A bitpacked struct converts to and from its
+any borrow (explicit or implicit) of a field is an error. A bitpacked struct converts to and from its
 backing integer with `s.bits()` and `S.from_bits(x)`; `from_bits` panics if a
 bit pattern is not valid for an enum field.
 

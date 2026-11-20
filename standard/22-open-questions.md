@@ -282,7 +282,7 @@ subset of types.
 Settled by: demand for plugins written in Tally and loaded by Tally programs.
 
 ```tally
-@export("plugin_init") pub extern "C" fn init(api: *HostApi) -> c_int may sys { ... }   // interim
+@unsafe(export("plugin_init")) pub extern "C" fn init(api: *HostApi) -> c_int may sys { ... }   // interim
 ```
 *From: D38, D7.*
 

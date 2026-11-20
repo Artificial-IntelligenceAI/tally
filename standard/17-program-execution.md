@@ -61,13 +61,13 @@ if args.len() < 2 { io.eprintln("usage: tool FILE"); process.exit(2); }
 
 **17.2.1** A library has no entry point. Its public items are used by
 dependent packages (chapter 18). A library may also be built as a static or
-shared C library (21.3.2), in which case only its `@export`ed functions are
+shared C library (21.3.2), in which case only its exported (14.3.1) functions are
 visible to foreign code, and the program that links it provides the panic
 handler and global allocator unless the library is built with `std`, which
 provides them.
 
 ```tally
-@export("png_decode") pub extern "C" fn decode(p: *u8, n: usize, out: *mut Image) -> c_int may alloc | panic { ... }
+@unsafe(export("png_decode")) pub extern "C" fn decode(p: *u8, n: usize, out: *mut Image) -> c_int may alloc | panic { ... }
 ```
 *From: D38, D61.*
 

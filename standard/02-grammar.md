@@ -137,7 +137,7 @@ ExternParams = Param { "," Param } [ "," "..." ] [ "," ] ;
 ```tally
 extern "C" {
     fn write(fd: i32, buf: *u8, n: usize) -> isize may sys | block;
-    fn printf(fmt: *u8, ...) -> i32 may sys | block;
+    fn printf(fmt: *c_char, ...) -> c_int may sys | block;
     static environ: *?*u8;
 }
 ```
@@ -469,7 +469,8 @@ match msg {
 **2.9.1** Attributes:
 
 ```text
-Attribute   = DOC | "@" IDENT [ "(" [ AttrArg % "," ] ")" ] ;
+Attribute   = DOC | "@" IDENT [ "(" [ AttrArg % "," ] ")" ]
+            | "@" "unsafe" "(" IDENT [ "(" [ AttrArg % "," ] ")" ] ")" ;
 AttrArg     = [ IDENT "=" ] Expr ;
 ```
 

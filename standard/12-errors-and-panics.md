@@ -84,8 +84,8 @@ fn f() { let x = g()?; }      // error: f does not return a result or optional
 
 **12.3.1** `core.alloc.AllocError` is the error of every allocating
 operation (D22). `std.io.Error` is the error of I/O operations; it carries an
-`ErrorKind` and the operating system's error code (20.2.1). Library errors are
-`@non_exhaustive` enums so that new causes can be added in minor versions.
+`ErrorKind` and the operating system's error code (20.2.1). Library error
+kinds are `@non_exhaustive` enums so that new causes can be added in minor versions.
 
 ```tally
 match File.open(p) {
@@ -142,8 +142,10 @@ unreachable();
 `Display` output, in order, into a buffer of `core.panic.MESSAGE_CAPACITY`
 bytes (at least 256) held in the panicking context; output beyond the
 capacity is discarded at a character boundary and the message ends with `…`.
-Building the message does not allocate. If an argument's `Display` panics or
-fails, the remaining arguments are skipped.
+Building the message does not allocate. If an argument's `Display` returns
+`FmtError`, the remaining arguments are skipped. A panic raised while a panic
+message is being built aborts the program (`core.process.abort`) without
+calling the handler.
 
 ```tally
 panic("invalid state ", state, " for request ", id);
@@ -151,7 +153,10 @@ panic("invalid state ", state, " for request ", id);
 *From: D21, D47.*
 
 **12.4.4** A program may define its own panic handler by placing
-`@panic_handler` on a function with the type given in 12.4.1. A program has
+`@panic_handler` on a function with no generic parameters, one parameter of
+type `&PanicInfo`, return type `never`, and effects within `sys | block`; on
+freestanding targets its effects must be within `sys`, because a panic may
+occur in an interrupt handler. A program has
 exactly one panic handler: defining more than one is a link error, and a
 program that does not link `std` and does not define one is a link error.
 

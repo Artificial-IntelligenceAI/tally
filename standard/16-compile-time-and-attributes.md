@@ -154,7 +154,7 @@ repeatable), or an argument of the wrong form is an error.
 | `@drop_ignores(T)` | `unsafe impl` of `Drop` | 9.6.2 |
 | `@entry` | function | freestanding entry point (17.3.1) |
 | `@expect_panic` / `@expect_panic("text")` | test | 21.3.4 |
-| `@export` / `@export("sym")` | public foreign-ABI function | 14.3.1 |
+| `@unsafe(export)` / `@unsafe(export("sym"))` | public foreign-ABI function | 14.3.1 |
 | `@global_allocator` | static | the program's global allocator (19.13.5) |
 | `@inline(always)`, `@inline(never)`, `@inline` | function | inlining request; `always` and `never` must be obeyed |
 | `@interrupt("NAME")` | function | 17.4.1 |
@@ -163,16 +163,20 @@ repeatable), or an argument of the wrong form is an error.
 | `@packed` | struct | 13.3.3 |
 | `@panic_handler` | function | 12.4.4 |
 | `@recursion_limit(N)` | function | 11.4.1 |
-| `@section("name")` | function, static | place in the named object-file section |
+| `@unsafe(section("name"))` | function, static | place in the named object-file section (unsafe: some sections make code run implicitly) |
 | `@stack_bound(N)` | foreign function | 14.1.5 |
 | `@stack_limit(N)` | function | 11.5.1 |
 | `@thread_local` | static | 15.5.1 |
 | `@track_caller` | function | panics and `source.location()` inside it report its caller's location (19.18.4) |
 | `@used` | static | keep the symbol even if unreferenced |
 
+The attributes `export` and `section` are *unsafe attributes*: they must be
+written inside `@unsafe(...)`, and writing them without it, or wrapping any
+other attribute in `@unsafe(...)`, is an error (13.1.2).
+
 ```tally
 @inline(never) @cold fn report_failure(code: u32) may sys | block { ... }
-@section(".isr_vector") @used static VECTORS: [16]?extern "C" fn() = [...];
+@unsafe(section(".isr_vector")) @used static VECTORS: [16]?extern "C" fn() = [...];
 ```
 *From: D11, D2.*
 
