@@ -1196,3 +1196,373 @@ package ecosystems and make builds unreproducible and hard for tools to
 understand. Declarative builds cover the common needs (compiling bundled C,
 linking system libraries, generating code). The loss is flexibility for
 unusual builds, which must use an external build system around `tally`.
+
+---
+
+## D46. Two library layers: `core` (including collections) and `std`
+
+**Chosen.** The library has two layers. `core` works on every target,
+including bare metal, and contains everything that does not need an operating
+system: primitive methods, iterators, formatting, cells, atomics, hashing,
+allocators, and the allocating collections (`Box`, `Vec`, `String`, `HashMap`,
+`Rc`, `Arc`), which use the program's global allocator or an allocator type
+argument. `std` adds the operating-system interfaces and re-exports `core`.
+`std` paths are UTF-8 strings.
+
+**Alternatives weighed.** Rust's three layers (`core`, `alloc`, `std`); one
+library with everything conditionally compiled; a minimal library with
+collections in third-party packages (C).
+
+**Why.** Because allocators are type parameters (D32) and the global
+allocator is just a declared static, collections have no reason to live
+outside `core`: a freestanding program that declares a global allocator gets
+`Vec` and `HashMap`, and one that uses only `Bump` never needs a global
+allocator at all. Two layers are simpler to explain than three. UTF-8 paths
+make the common case simple and portable; non-UTF-8 Unix paths are served by a
+platform module, which is the honest place for a platform-specific concern.
+
+---
+
+## D47. Formatting without format strings; rest parameters
+
+**Chosen.** Printing and formatting take any number of arguments, each
+written with its `Display` implementation in order:
+`io.println("x = ", x, ", y = ", y)`. Formatting options are wrapper values
+(`fmt.hex(x)`, `fmt.fixed(f, 3)`). The language feature that makes this
+possible is the *rest parameter* (`..args: A`), which packs trailing
+arguments into a tuple whose type is a generic parameter; tuples implement
+`Display` by concatenation. `Display.fmt` is generic over an effect parameter
+for the output sink, so formatting into a fixed buffer is effect-free while
+formatting to a file has the file's effects.
+
+**Alternatives weighed.** Format strings checked by macros (Rust's
+`format!`), which Tally cannot have without macros (D40); format strings
+checked at run time (C's `printf`, unsafe or panicking); C++20 `std::format`
+with compile-time checking through templates; operator chaining
+(`std::cout <<`).
+
+**Why.** Concatenating typed arguments cannot have a mismatch between a
+format string and its arguments, needs no parsing at run time, and works with
+the effect system. Rest parameters are a small, general feature (also used by
+`assert` and `panic`) rather than a special case for printing. The cost is
+that long format strings with many placeholders are less compact, and
+localisation (which reorders arguments) needs a library with its own format
+strings.
+
+---
+
+## D48. Hashing: SipHash-1-3 with a per-process random key
+
+**Chosen.** `HashMap` and `HashSet` default to SipHash-1-3, keyed with a key
+that `std` reads from the operating system's random source at start-up. The
+iteration order of hash collections is unspecified. The `Hash` encodings of
+built-in types are fully specified.
+
+**Alternatives weighed.** A faster non-cryptographic hash (FxHash, wyhash) as
+the default, with predictable iteration order; a fixed key.
+
+**Why.** Systems programs are often network-facing, and a predictable hash
+lets attackers make every insertion collide (HashDoS). Predictability (D2.1)
+argues for deterministic order, but soundness of the program's performance
+under attack wins here, and code that needs deterministic order can choose a
+different hasher or sort. Specifying the byte encodings means two
+implementations hashing with the same key produce the same values.
+
+---
+
+## D49. Tests live in the source and run in separate processes
+
+**Chosen.** Tests are `test "name" { ... }` items written in any module,
+compiled only by `tally test`, and run each in its own process. A test passes
+if its body returns normally (or returns `.Ok`), fails if it returns an error
+or panics, and `@expect_panic` inverts the panic case.
+
+**Alternatives weighed.** Tests as attributed functions (Rust's `#[test]`);
+separate test directories only (Go's `_test.go` files are in-package but
+separate files); running all tests in one process with panic catching.
+
+**Why.** In-source tests sit next to the code they test and can use
+package-visible items. Because panics never unwind (D21), a panicking test
+cannot be caught inside the process, so separate processes are the only
+correct isolation; they also prevent tests from interfering through global
+state. The cost is process start-up time per test.
+
+---
+
+## D50. One command, `tally`, with cost-reporting subcommands
+
+**Chosen.** The whole toolchain is one command with subcommands for
+building, running, testing, checking, formatting, documenting, fetching,
+releasing and querying. Two subcommands exist specifically for cost
+accounting: `tally costs` reports each function's effects and stack bound with
+its deepest path, and `tally audit` reports the effects and unsafe code of
+every dependency. Diagnostics cite the rule of the standard they enforce.
+
+**Alternatives weighed.** A separate compiler and build tool (C, C++, Rust's
+`rustc` and `cargo`); a build system written in the language (Zig).
+
+**Why.** One entry point is easier to learn and to standardise. The cost
+commands make the major feature (D3) usable day to day: a developer can ask
+why a function is unbounded or which dependency introduced `sys`. Citing rule
+numbers makes every error traceable to a rule and, through it, to the
+decision behind it.
+
+---
+
+## D51. One canonical source format, defined in the standard
+
+**Chosen.** `tally fmt` produces a single canonical format whose rules are part
+of the standard, with no configuration options.
+
+**Alternatives weighed.** A configurable formatter (clang-format, rustfmt
+options); no formatter.
+
+**Why.** A single format removes style discussion, keeps diffs small, and
+makes explicit semicolons (D10) and other syntax costless to write. Putting
+the rules in the standard lets independent implementations agree.
+
+---
+
+## D52. Assignment is a statement; values must be used
+
+**Chosen.** Assignment and compound assignment are statements, not
+expressions. An expression statement must have type `()` or `never`; any
+other value must be used or discarded with `_ = expr;`.
+
+**Alternatives weighed.** Assignment as an expression (C); warnings for unused
+results (Rust's `#[must_use]`, opt-in per type); silently discarding values.
+
+**Why.** Assignment inside expressions causes the classic `if (x = y)` bug and
+complicates evaluation order. Requiring every value to be used makes ignored
+errors impossible to miss (D20) without a per-type attribute, and `_ =` makes
+the deliberate cases visible.
+
+---
+
+## D53. Labels are `name:` and are referred to as `:name`
+
+**Chosen.** Loops and blocks may be labelled `name:`; `break :name value` and
+`continue :name` refer to them. Unlabelled `break` targets the innermost loop
+only.
+
+**Alternatives weighed.** Rust's `'name:` (uses the apostrophe, which Tally
+otherwise uses only for characters); `goto`; no labels.
+
+**Why.** Labelled breaks are needed for nested loops and for early exit from
+blocks that compute a value. Zig's `:name` form is unambiguous with the
+optional break operand. Unlabelled `break` never targets a labelled block so
+that adding a label never changes what an existing `break` does.
+
+---
+
+## D54. Closures capture by reference unless `move`
+
+**Chosen.** Closures are written `|params| body`, capture each used binding
+by the weakest mode their body needs (shared reference, exclusive reference,
+or by value when moved), or everything by value with `move`, and implement
+`Fn`, `FnMut` and `FnOnce` as their bodies allow. A closure's effects are its
+body's.
+
+**Alternatives weighed.** Explicit capture lists (C++); capture by value only
+(simple but forces copies or reference-counted sharing); Rust's model (which
+this is).
+
+**Why.** Inferred capture modes are safe because the borrow checker checks
+them, and they need no annotation in the common case. `move` covers threads
+and fibers that outlive their creator's frame. Explicit capture lists would be
+more predictable to read but rarely tell the reader anything the checker does
+not already enforce.
+
+---
+
+## D55. Local bindings may shadow
+
+**Chosen.** A `let` may introduce a name that shadows an earlier binding or an
+outer name, including in the same block.
+
+**Alternatives weighed.** Forbidding shadowing entirely (Zig); forbidding it
+within a block only.
+
+**Why.** Shadowing lets a value change type or form without inventing names
+(`let s = s.trim();`), which is common when parsing. The risk, a reader
+missing that a name was rebound, is limited because shadowing never affects
+code before it, and the canonical formatter keeps `let` statements at the
+start of lines.
+
+---
+
+## D56. `defer`, but not `errdefer`
+
+**Chosen.** `defer e;` runs `e` when the enclosing block exits by any route
+except a panic. There is no form that runs only on error.
+
+**Alternatives weighed.** Zig's `defer` and `errdefer`; destructors only (Rust,
+C++ RAII); `try`/`finally`.
+
+**Why.** Ownership with destructors (D23) handles most cleanup, but raw
+foreign resources (a file descriptor from C, a lock taken in assembly) would
+otherwise each need a wrapper type. `defer` covers those in one line.
+`errdefer` was rejected because it needs the notion of "exiting with an
+error", which in Tally is just returning a value, and guard objects with an
+explicit `commit()` express the same thing without a new rule.
+
+---
+
+## D57. Strings are UTF-8; `char` is a Unicode scalar value
+
+**Chosen.** `str` is always valid UTF-8 and is indexed by byte, with slicing
+that panics at a non-boundary. `char` holds one Unicode scalar value. Byte
+literals and byte strings exist for binary data, and C string literals
+(`c"..."`) for foreign calls.
+
+**Alternatives weighed.** Byte strings with no encoding guarantee (C, Zig, Go
+in practice); UTF-16 (Java, Windows); grapheme-based indexing (Swift).
+
+**Why.** UTF-8 is the encoding of the network, of files and of Unix, so most
+data never needs conversion; a validity guarantee lets text functions be
+correct without re-validating. Byte indexing keeps costs visible (no hidden
+O(n) indexing). Grapheme clusters are a library concern because they depend on
+Unicode version tables.
+
+---
+
+## D58. Method calls auto-reference and auto-dereference; `Deref` is effect-free
+
+**Chosen.** Method calls find methods by trying the receiver's type and its
+dereferences (through references, `Box` and `Deref` impls), each by value,
+then by shared reference, then by exclusive reference. Field access
+auto-dereferences the same way. `Deref` and `DerefMut` impls must have no
+effects. Deref coercion applies at coercion sites (`&String` to `&str`).
+
+**Alternatives weighed.** No automatic referencing (C's `->` vs `.`, Zig);
+Rust's model with arbitrary `Deref` code.
+
+**Why.** Without auto-referencing, method calls on references and smart
+pointers become noisy (`(&*b).len()`). The hidden call this introduces is the
+one exception to "no hidden user code" (D17), and requiring `Deref` to be
+effect-free means the hidden call cannot allocate, block, crash or touch the
+outside world, which keeps D2.1.
+
+---
+
+## D59. Sized by default, with `?Sized` opt-out; no user-defined unsized types
+
+**Chosen.** Slices, `str` and trait objects are the only unsized types. Type
+parameters are sized unless marked `?Sized`. Programs cannot declare their own
+unsized types (no struct with an unsized last field).
+
+**Alternatives weighed.** Rust's model, including custom dynamically sized
+types; no unsized types (every slice is a struct of pointer and length).
+
+**Why.** Unsized types let `&[]T`, `&str` and `&dyn Tr` be ordinary
+references, which keeps the borrowing model uniform. Custom unsized types are
+rarely written and complicate layout and generic code, so they are left out.
+
+---
+
+## D60. Patterns: bare identifiers always bind; matches are exhaustive
+
+**Chosen.** In patterns, a bare identifier always introduces a binding;
+enum variants and constants are written with a dot (`.None`, `Color.Red`).
+Matches must be exhaustive and an unreachable arm is an error. Matching a
+reference auto-dereferences and binds by reference (default binding modes).
+
+**Alternatives weighed.** Rust's rule, where a bare identifier is a binding
+unless a constant or unit variant of that name is in scope (a well-known
+source of bugs when an import is missing); unreachable arms as warnings.
+
+**Why.** The meaning of a pattern should not depend on what happens to be in
+scope (D2.3). Leading-dot variants keep patterns short. Unreachable arms are
+almost always mistakes, and with exhaustiveness required, an error costs
+nothing in correct code.
+
+---
+
+## D61. Program entry points
+
+**Chosen.** Hosted binaries start at `main`, which may return `()`, an exit
+code `u8`, or a result whose error is printed. No user code runs before
+`main`. Freestanding programs mark one function `@entry` and must provide a
+panic handler (and a global allocator if they allocate). Interrupt handlers
+are functions marked `@interrupt("NAME")`, and may not have `alloc` or
+`block`.
+
+**Alternatives weighed.** C's `main(argc, argv)` with static constructors
+before it (C++); Rust's `#[no_main]` and linker-driven entry points.
+
+**Why.** No code before `main` keeps start-up predictable (D2.1): statics are
+compile-time values, so initialisation order problems cannot occur.
+Arguments through a library function rather than parameters keep `main`'s
+signature small. Constraining interrupt handlers' effects in the language is a
+direct use of the major feature.
+
+---
+
+## D62. Packages declare the language version they use
+
+**Chosen.** Each manifest states `tally = "1"`, the major version of the
+standard the package is written against. A future major version may change
+the language; compilers must keep compiling older versions and link packages
+of different versions together.
+
+**Alternatives weighed.** No versioning (breaking changes break everyone);
+Rust's editions (which this follows); separate languages.
+
+**Why.** Mistakes in a first standard will need fixing, and the only way to
+fix syntax and semantics without breaking the ecosystem is to let each
+package opt in. Linking across versions keeps the ecosystem whole.
+
+---
+
+## D63. Type inference is local to function bodies
+
+**Chosen.** Types are inferred only inside function bodies and constant
+initialisers, with bidirectional checking and unification; signatures,
+fields, constants and statics are always written in full. Expressions that
+need a type to be resolved (method calls, field access, `?`) require it to be
+known at that point.
+
+**Alternatives weighed.** Whole-program Hindley–Milner inference (ML,
+Haskell); inference of return types (C++ `auto`, Go closures).
+
+**Why.** Written signatures are the contracts that local reasoning (D2.3) and
+the package boundary (D29) rely on, and they keep type errors local.
+Requiring types to be known in order, as Rust does, keeps inference simple to
+specify and its errors understandable.
+
+---
+
+## D64. Evaluation order is strictly left to right
+
+**Chosen.** Operands, arguments and fields are evaluated left to right, each
+once; in an assignment the right side is evaluated before the place.
+
+**Alternatives weighed.** Unspecified order (C, C++ before C++17), which
+permits optimisations and breeds bugs; right side last in assignments (Java).
+
+**Why.** Predictability (D2.1): a reader must be able to tell in which order
+effects happen. Evaluating the assigned value before the place follows Rust:
+the place is computed from the state after the value's side effects, so the
+store goes where the place points at the moment of storing, and a compound
+assignment `p op= v` reads and writes the same, freshly computed place.
+
+---
+
+## D65. Floating-point functions are correctly rounded
+
+**Chosen.** Every floating-point function in `core` (square root, exponential,
+logarithm, trigonometric and hyperbolic functions, power, hypotenuse) returns
+the correctly rounded result for every argument on every target.
+
+**Alternatives weighed.** Platform `libm` results (C, Rust, Zig), which differ
+between platforms and versions; a documented error bound (such as 1 ulp);
+exposing only IEEE-required operations (`sqrt`).
+
+**Why.** Predictability (D2.1) applied to numbers: the same program computing
+the same function must produce the same bits everywhere, which matters for
+reproducible simulations, lock-step networking, deterministic replay and
+testing. Correctly rounded implementations of all these functions for
+binary32 and binary64 now exist (the CORE-MATH project) with performance close
+to conventional libraries. The cost is somewhat slower code than the fastest
+approximations, and implementers must use or port such implementations rather
+than calling the platform's `libm`.
